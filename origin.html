@@ -184,37 +184,48 @@
     return cells;
   }
 
-  function computeDominantDirection(trajectories) {
-    const bearings = [];
+function computeDominantDirection(trajectories) {
+  const fromBearings = [];
 
-    for (const traj of trajectories) {
-      if (traj.length < 2) continue;
-      const start = traj[traj.length - 1];
-      const end   = traj[0];
-      const b = bearingDeg(start.lat, start.lon, end.lat, end.lon);
-      bearings.push(b);
-    }
+  for (const traj of trajectories) {
+    if (traj.length < 2) continue;
 
-    if (!bearings.length) {
-      return { sector: null, meanBearing: null, samples: 0 };
-    }
+    // start = oldest point (upwind), end = receptor
+    const start = traj[traj.length - 1];
+    const end   = traj[0];
 
-    const mean = bearings.reduce((a,b)=>a+b,0) / bearings.length;
+    // this is the direction of motion (from start → end)
+    const motionBearing = bearingDeg(start.lat, start.lon, end.lat, end.lon);
 
-    const sectorCounts = {};
-    for (const b of bearings) {
-      const s = bearingToSector(b);
-      sectorCounts[s] = (sectorCounts[s] || 0) + 1;
-    }
-    const dominantSector = Object.entries(sectorCounts)
-      .sort((a,b)=>b[1]-a[1])[0][0];
+    // meteorological convention: direction the air is COMING FROM
+    const windFrom = (motionBearing + 180.0) % 360.0;
 
-    return {
-      sector: dominantSector,
-      meanBearing: mean,
-      samples: bearings.length
-    };
+    fromBearings.push(windFrom);
   }
+
+  if (!fromBearings.length) {
+    return { sector: null, meanBearing: null, samples: 0 };
+  }
+
+  // mean "from" direction
+  const meanFrom = fromBearings.reduce((a, b) => a + b, 0) / fromBearings.length;
+
+  // convert to compass sectors (N, NE, E, …) using the "from" angles
+  const sectorCounts = {};
+  for (const b of fromBearings) {
+    const s = bearingToSector(b);
+    sectorCounts[s] = (sectorCounts[s] || 0) + 1;
+  }
+  const dominantSector = Object.entries(sectorCounts)
+    .sort((a, b) => b[1] - a[1])[0][0];
+
+  return {
+    sector: dominantSector,      // e.g. "W" = wind FROM west
+    meanBearing: meanFrom,       // numeric wind-from direction (deg)
+    samples: fromBearings.length
+  };
+}
+
 
   // ─────────────────────────────────────────
   // Draw trajectories + footprint
@@ -266,8 +277,12 @@
 
       const popupHtml = `
         <b>Air origin (last ~2 hours)</b><br/>
-        Dominant sector: <b>${dom.sector ?? "N/A"}</b><br/>
-        Mean bearing: ${dom.meanBearing ? dom.meanBearing.toFixed(0) + "&deg;" : "N/A"}<br/>
+        Dominant upwind sector: <b>${dom.sector ?? "N/A"}</b><br/>
+        Mean wind-from direction: ${
+          dom.meanBearing !== null
+            ? dom.meanBearing.toFixed(0) + "&deg;"
+            : "N/A"
+        }<br/>
         Ensemble members: ${dom.samples}
       `;
 
