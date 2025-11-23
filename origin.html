@@ -78,54 +78,95 @@
   // ─────────────────────────────────────────
   // Numeric wind from GeoMet WFS  (HRDPS UU/VV)
   // ─────────────────────────────────────────
+
   async function getWindAt(lat, lon) {
-    const base = "https://geo.weather.gc.ca/geomet";
+  const base = "https://geo.weather.gc.ca/geomet";
 
-    // single-point bbox
-    const bbox = `${lon},${lat},${lon},${lat}`;
+  const bbox = `${lon},${lat},${lon},${lat}`;
 
-    // U-component
-    const paramsU = new URLSearchParams({
-      service: "WFS",
-      version: "2.0.0",
-      request: "GetFeature",
-      typeName: "HRDPS.CONTINENTAL_UU",
-      bbox,
-      outputFormat: "application/json"
-    });
+  // U-component
+  const paramsU = new URLSearchParams({
+    service: "WFS",
+    version: "2.0.0",
+    request: "GetFeature",
+    typeName: "HRDPS.CONTINENTAL_UU",
+    bbox,
+    outputFormat: "application/json"
+  });
 
-    const uResp = await fetch(`${base}?${paramsU.toString()}`);
-    const uJson = await uResp.json();
-    let u = 0;
-    try {
-      const props = uJson.features[0].properties;
-      u = props["HRDPS.CONTINENTAL_UU"];
-    } catch (e) {
-      u = 0;
-    }
+  const uUrl = `${base}?${paramsU.toString()}`;
+  console.log("U URL:", uUrl);
 
-    // V-component
-    const paramsV = new URLSearchParams({
-      service: "WFS",
-      version: "2.0.0",
-      request: "GetFeature",
-      typeName: "HRDPS.CONTINENTAL_VV",
-      bbox,
-      outputFormat: "application/json"
-    });
+  const uResp = await fetch(uUrl);
 
-    const vResp = await fetch(`${base}?${paramsV.toString()}`);
-    const vJson = await vResp.json();
-    let v = 0;
-    try {
-      const props = vJson.features[0].properties;
-      v = props["HRDPS.CONTINENTAL_VV"];
-    } catch (e) {
-      v = 0;
-    }
-
-    return { u, v };
+  if (!uResp.ok) {
+    console.error("U request failed:", uResp.status, uResp.statusText);
+    const text = await uResp.text();
+    console.error("U response text:", text.slice(0, 200));
+    return { u: 0, v: 0 };
   }
+
+  let uJson;
+  try {
+    uJson = await uResp.json();
+  } catch (e) {
+    const text = await uResp.text();
+    console.error("U JSON parse error. Raw text:", text.slice(0, 200));
+    return { u: 0, v: 0 };
+  }
+
+  let u = 0;
+  try {
+    const props = uJson.features[0].properties;
+    u = props["HRDPS.CONTINENTAL_UU"];
+  } catch (e) {
+    console.error("Could not extract U value:", e, uJson);
+    u = 0;
+  }
+
+  // V-component
+  const paramsV = new URLSearchParams({
+    service: "WFS",
+    version: "2.0.0",
+    request: "GetFeature",
+    typeName: "HRDPS.CONTINENTAL_VV",
+    bbox,
+    outputFormat: "application/json"
+  });
+
+  const vUrl = `${base}?${paramsV.toString()}`;
+  console.log("V URL:", vUrl);
+
+  const vResp = await fetch(vUrl);
+
+  if (!vResp.ok) {
+    console.error("V request failed:", vResp.status, vResp.statusText);
+    const text = await vResp.text();
+    console.error("V response text:", text.slice(0, 200));
+    return { u: 0, v: 0 };
+  }
+
+  let vJson;
+  try {
+    vJson = await vResp.json();
+  } catch (e) {
+    const text = await vResp.text();
+    console.error("V JSON parse error. Raw text:", text.slice(0, 200));
+    return { u: 0, v: 0 };
+  }
+
+  let v = 0;
+  try {
+    const propsV = vJson.features[0].properties;
+    v = propsV["HRDPS.CONTINENTAL_VV"];
+  } catch (e) {
+    console.error("Could not extract V value:", e, vJson);
+    v = 0;
+  }
+
+  return { u, v };
+}
+
 
   // ─────────────────────────────────────────
   // Trajectory math helpers (JS versions)
