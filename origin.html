@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Air Origin Map (GitHub-only)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- Leaflet CSS -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+    }
+    #map {
+      width: 100%;
+      height: 100%;
+    }
+    .info {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 1000;
+      background: rgba(255,255,255,0.9);
+      padding: 8px 10px;
+      border-radius: 8px;
+      font-family: system-ui, Arial, sans-serif;
+      font-size: 13px;
+      box-shadow: 0 1px 6px rgba(0,0,0,0.2);
+      max-width: 320px;
+    }
+  </style>
+</head>
+<body>
+
+<div id="map"></div>
+<div class="info">
+  Click the map to compute a simple backward trajectory ensemble (in browser).<br>
+  Uses HRDPS winds via GeoMet WFS (no backend).
+</div>
+
+<!-- Leaflet JS -->
+<script
+  src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+  integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+  crossorigin="">
+</script>
+
+<script>
+  // ─────────────────────────────────────────
+  // Map setup
+  // ─────────────────────────────────────────
+  const map = L.map('map').setView([53.5, -113.5], 6);
+
+  // Base tiles
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 10,
+    attribution: '&copy; OpenStreetMap contributors'
+  }).addTo(map);
+
+  // Optional: overlay your HRDPS wind WMS for context
+  // (purely visual; numeric values come from WFS below)
+  L.tileLayer.wms("https://geo.weather.gc.ca/geomet/?lang=en", {
+    layers: "HRDPS.CONTINENTAL_WSPD",
+    format: "image/png",
+    transparent: true,
+    opacity: 0.5
+  }).addTo(map);
+
+  const trajLayerGroup = L.layerGroup().addTo(map);
+
+  // ─────────────────────────────────────────
+  // Numeric wind from GeoMet WFS  (HRDPS UU/VV)
+  // ─────────────────────────────────────────
+  async function getWindAt(lat, lon) {
+    const base = "https://geo.weather.gc.ca/geomet";
+
+    // single-point bbox
+    const bbox = `${lon},${lat},${lon},${lat}`;
+
+    // U-component
+    const paramsU = new URLSearchParams({
+      service: "WFS",
+      version: "2.0.0",
+      request: "GetFeature",
+      typeName: "HRDPS.CONTINENTAL_UU",
+      bbox,
+      outputFormat: "application/json"
+    });
+
+    const uResp = await fetch(`${base}?${paramsU.toString()}`);
+    const uJson = await uResp.json();
+    let u = 0;
+    try {
+      const props = uJson.features[0].properties;
+      u = props["HRDPS.CONTINENTAL_UU"];
+    } catch (e) {
+      u = 0;
+    }
+
+    // V-component
+    const paramsV = new URLSearchParams({
+      service: "WFS",
+      version: "2.0.0",
+      request: "GetFeature",
+      typeName: "HRDPS.CONTINENTAL_VV",
+      bbox,
+      outputFormat: "application/json"
+    });
+
+    const vResp = await fetch(`${base}?${paramsV.toString()}`);
+    const vJson = await vResp.json();
+    let v = 0;
+    try {
+      const props = vJson.features[0].properties;
+      v = props["HRDPS.CONTINENTAL_VV"];
+    } catch (e) {
+      v = 0;
+    }
+
+    return { u, v };
+  }
+
+  // ─────────────────────────────────────────
+  // Trajectory math helpers (JS versions)
+  // ─────────────────────────────────────────
+  const EARTH_RADIUS_M = 6371000.0;
+
+  function uvToLatLonStep(latDeg, u, v, dtSeconds) {
+    const latRad = latDeg * Math.PI / 180.0;
+    let dlat = (v * dtSeconds) / EARTH_RADIUS_M * (180.0 / Math.PI);
+    let dlon = (u * dtSeconds) / (EARTH_RADIUS_M * Math.cos(latRad)) * (180.0 / Math.PI);
+    return { dlat, dlon };
+  }
+
+  function bearingDeg(lat1, lon1, lat2, lon2) {
+    const phi1 = lat1 * Math.PI / 180.0;
+    const phi2 = lat2 * Math.PI / 180.0;
+    const dlon = (lon2 - lon1) * Math.PI / 180.0;
+
+    const x = Math.sin(dlon) * Math.cos(phi2);
+    const y = Math.cos(phi1) * Math.sin(phi2) -
+              Math.sin(phi1) * Math.cos(phi2) * Math.cos(dlon);
+
+    const brng = Math.atan2(x, y) * 180.0 / Math.PI;
+    return (brng + 360.0) % 360.0;
+  }
+
+  function bearingToSector(bearing) {
+    const labels = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+    const sectorSize = 360.0 / labels.length;
+    const idx = Math.floor((bearing + sectorSize / 2.0) / sectorSize) % labels.length;
+    return labels[idx];
+  }
+
+  // ─────────────────────────────────────────
+  // Core: compute ensemble trajectories in browser
+  // ─────────────────────────────────────────
+  async function computeEnsembleTrajectories(startLat, startLon, options = {}) {
+    const nParticles = options.nParticles ?? 8;      // keep small for now
+    const hoursBack  = options.hoursBack ?? 2.0;     // 2 hours for speed
+    const dtMinutes  = options.dtMinutes ?? 10;      // 10-min steps
+    const dtSeconds  = dtMinutes * 60.0;
+    const nSteps     = Math.round(hoursBack * 60.0 / dtMinutes);
+
+    const trajectories = [];
+
+    for (let p = 0; p < nParticles; p++) {
+      let lat = startLat + (Math.random() - 0.5) * 0.03;
+      let lon = startLon + (Math.random() - 0.5) * 0.03;
+
+      const traj = [{ lat, lon }];
+
+      for (let k = 0; k < nSteps; k++) {
+        const { u, v } = await getWindAt(lat, lon);   // HRDPS call
+
+        const { dlat, dlon } = uvToLatLonStep(lat, u, v, dtSeconds);
+
+        // backward = move opposite wind
+        lat -= dlat;
+        lon -= dlon;
+
+        traj.push({ lat, lon });
+      }
+
+      trajectories.push(traj);
+    }
+
+    return trajectories;
+  }
+
+  function buildFootprint(trajectories, dlat = 0.05, dlon = 0.05) {
+    const counts = new Map();
+
+    for (const traj of trajectories) {
+      for (const pt of traj) {
+        const iy = Math.round(pt.lat / dlat);
+        const ix = Math.round(pt.lon / dlon);
+        const key = `${iy},${ix}`;
+        counts.set(key, (counts.get(key) || 0) + 1);
+      }
+    }
+
+    const cells = [];
+    for (const [key, count] of counts.entries()) {
+      const [iy, ix] = key.split(",").map(Number);
+      cells.push({
+        lat: iy * dlat,
+        lon: ix * dlon,
+        count
+      });
+    }
+    return cells;
+  }
+
+  function computeDominantDirection(trajectories) {
+    const bearings = [];
+
+    for (const traj of trajectories) {
+      if (traj.length < 2) continue;
+      const start = traj[traj.length - 1];
+      const end   = traj[0];
+      const b = bearingDeg(start.lat, start.lon, end.lat, end.lon);
+      bearings.push(b);
+    }
+
+    if (!bearings.length) {
+      return { sector: null, meanBearing: null, samples: 0 };
+    }
+
+    const mean = bearings.reduce((a,b)=>a+b,0) / bearings.length;
+
+    const sectorCounts = {};
+    for (const b of bearings) {
+      const s = bearingToSector(b);
+      sectorCounts[s] = (sectorCounts[s] || 0) + 1;
+    }
+    const dominantSector = Object.entries(sectorCounts)
+      .sort((a,b)=>b[1]-a[1])[0][0];
+
+    return {
+      sector: dominantSector,
+      meanBearing: mean,
+      samples: bearings.length
+    };
+  }
+
+  // ─────────────────────────────────────────
+  // Draw trajectories + footprint
+  // ─────────────────────────────────────────
+  function drawTrajectories(trajectories) {
+    trajectories.forEach(traj => {
+      const latlngs = traj.map(pt => [pt.lat, pt.lon]);
+      L.polyline(latlngs, {
+        weight: 2,
+        opacity: 0.9
+      }).addTo(trajLayerGroup);
+    });
+  }
+
+  function drawFootprint(cells) {
+    cells.forEach(cell => {
+      const radius = 300 + cell.count * 80; // metres
+      L.circle([cell.lat, cell.lon], {
+        radius,
+        weight: 0,
+        fillOpacity: 0.25
+      }).addTo(trajLayerGroup);
+    });
+  }
+
+  // ─────────────────────────────────────────
+  // Click handler: do everything client-side
+  // ─────────────────────────────────────────
+  map.on("click", async (e) => {
+    const { lat, lng } = e.latlng;
+    trajLayerGroup.clearLayers();
+
+    // receptor marker
+    L.circleMarker(e.latlng, { radius: 5 }).addTo(trajLayerGroup);
+
+    try {
+      // you can tweak these numbers later
+      const trajectories = await computeEnsembleTrajectories(lat, lng, {
+        nParticles: 8,
+        hoursBack: 2,
+        dtMinutes: 10
+      });
+
+      const footprint = buildFootprint(trajectories);
+      const dom = computeDominantDirection(trajectories);
+
+      drawTrajectories(trajectories);
+      drawFootprint(footprint);
+
+      const popupHtml = `
+        <b>Air origin (last ~2 hours)</b><br/>
+        Dominant sector: <b>${dom.sector ?? "N/A"}</b><br/>
+        Mean bearing: ${dom.meanBearing ? dom.meanBearing.toFixed(0) + "&deg;" : "N/A"}<br/>
+        Ensemble members: ${dom.samples}
+      `;
+
+      L.popup()
+        .setLatLng(e.latlng)
+        .setContent(popupHtml)
+        .openOn(map);
+
+    } catch (err) {
+      console.error("Trajectory error", err);
+      alert("Error computing trajectories (check console)");
+    }
+  });
+</script>
+
+</body>
+</html>
