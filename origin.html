@@ -79,12 +79,11 @@
   // Numeric wind from GeoMet WFS  (HRDPS UU/VV)
   // ─────────────────────────────────────────
 
-  async function getWindAt(lat, lon) {
+async function getWindAt(lat, lon) {
   const base = "https://geo.weather.gc.ca/geomet";
-
   const bbox = `${lon},${lat},${lon},${lat}`;
 
-  // U-component
+  // ---------- U-component ----------
   const paramsU = new URLSearchParams({
     service: "WFS",
     version: "2.0.0",
@@ -98,33 +97,29 @@
   console.log("U URL:", uUrl);
 
   const uResp = await fetch(uUrl);
+  const uText = await uResp.text();        // read ONCE
 
-  if (!uResp.ok) {
-    console.error("U request failed:", uResp.status, uResp.statusText);
-    const text = await uResp.text();
-    console.error("U response text:", text.slice(0, 200));
-    return { u: 0, v: 0 };
-  }
-
-  let uJson;
-  try {
-    uJson = await uResp.json();
-  } catch (e) {
-    const text = await uResp.text();
-    console.error("U JSON parse error. Raw text:", text.slice(0, 200));
-    return { u: 0, v: 0 };
-  }
+  console.log("U raw text (first 200):", uText.slice(0, 200));
 
   let u = 0;
-  try {
-    const props = uJson.features[0].properties;
-    u = props["HRDPS.CONTINENTAL_UU"];
-  } catch (e) {
-    console.error("Could not extract U value:", e, uJson);
-    u = 0;
+  if (uResp.ok) {
+    try {
+      const uJson = JSON.parse(uText);
+      if (uJson.features && uJson.features.length > 0) {
+        const props = uJson.features[0].properties;
+        // adjust key name if needed after we see actual JSON
+        u = props["HRDPS.CONTINENTAL_UU"] ?? 0;
+      } else {
+        console.warn("U: no features in response");
+      }
+    } catch (e) {
+      console.error("U JSON parse error:", e);
+    }
+  } else {
+    console.error("U HTTP error:", uResp.status, uResp.statusText);
   }
 
-  // V-component
+  // ---------- V-component ----------
   const paramsV = new URLSearchParams({
     service: "WFS",
     version: "2.0.0",
@@ -138,34 +133,30 @@
   console.log("V URL:", vUrl);
 
   const vResp = await fetch(vUrl);
+  const vText = await vResp.text();        // read ONCE
 
-  if (!vResp.ok) {
-    console.error("V request failed:", vResp.status, vResp.statusText);
-    const text = await vResp.text();
-    console.error("V response text:", text.slice(0, 200));
-    return { u: 0, v: 0 };
-  }
-
-  let vJson;
-  try {
-    vJson = await vResp.json();
-  } catch (e) {
-    const text = await vResp.text();
-    console.error("V JSON parse error. Raw text:", text.slice(0, 200));
-    return { u: 0, v: 0 };
-  }
+  console.log("V raw text (first 200):", vText.slice(0, 200));
 
   let v = 0;
-  try {
-    const propsV = vJson.features[0].properties;
-    v = propsV["HRDPS.CONTINENTAL_VV"];
-  } catch (e) {
-    console.error("Could not extract V value:", e, vJson);
-    v = 0;
+  if (vResp.ok) {
+    try {
+      const vJson = JSON.parse(vText);
+      if (vJson.features && vJson.features.length > 0) {
+        const propsV = vJson.features[0].properties;
+        v = propsV["HRDPS.CONTINENTAL_VV"] ?? 0;
+      } else {
+        console.warn("V: no features in response");
+      }
+    } catch (e) {
+      console.error("V JSON parse error:", e);
+    }
+  } else {
+    console.error("V HTTP error:", vResp.status, vResp.statusText);
   }
 
   return { u, v };
 }
+
 
 
   // ─────────────────────────────────────────
