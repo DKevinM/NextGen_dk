@@ -80,14 +80,10 @@
   // ─────────────────────────────────────────
 
   async function getWindAt(lat, lon) {
-  // Temporary dummy wind so the trajectories work
-  // ~8 m/s from W→E and ~1 m/s from S→N, plus tiny jitter
-  const baseU = 8;
-  const baseV = 1;
-  const u = baseU + (Math.random() - 0.5) * 1.0;
-  const v = baseV + (Math.random() - 0.5) * 1.0;
-  return { u, v };
-}
+    // For now we ignore lat/lon here and just use the lastWind
+    // (which we update once per click from Open-Meteo).
+    return lastWind;
+  }
 
 
 
@@ -124,6 +120,52 @@
     return labels[idx];
   }
 
+  
+  // Global "current wind" used by the trajectories for the last click
+  let lastWind = { u: 8, v: 1 };  // default until we fetch real data
+  
+  // Fetch real wind from Open-Meteo at the click location
+  async function updateWindFromOpenMeteo(lat, lon) {
+    const url = new URL("https://api.open-meteo.com/v1/forecast");
+    url.searchParams.set("latitude", lat);
+    url.searchParams.set("longitude", lon);
+    url.searchParams.set("current_weather", "true");
+  
+    const resp = await fetch(url.toString());
+    if (!resp.ok) {
+      console.error("Open-Meteo error:", resp.status, resp.statusText);
+      return;
+    }
+  
+    const data = await resp.json();
+    if (!data.current_weather) {
+      console.warn("No current_weather in Open-Meteo response");
+      return;
+    }
+  
+    const speed_kmh = data.current_weather.windspeed;   // km/h
+    const dir_deg   = data.current_weather.winddirection; // degrees FROM
+  
+    // Convert to m/s
+    const speed_ms = speed_kmh / 3.6;
+  
+    // Open-Meteo direction = where the wind is COMING FROM (met convention)
+    const dir_rad = dir_deg * Math.PI / 180.0;
+  
+    // Flow components (toward where air is going):
+    // u = eastward, v = northward
+    // Negative because direction is "from"
+    const u = -speed_ms * Math.sin(dir_rad);
+    const v = -speed_ms * Math.cos(dir_rad);
+  
+    lastWind = { u, v };
+    console.log("Updated wind from Open-Meteo:", lastWind, "(dir from", dir_deg, "°)");
+  }
+
+
+
+
+  
   // ─────────────────────────────────────────
   // Core: compute ensemble trajectories in browser
   // ─────────────────────────────────────────
@@ -261,6 +303,36 @@ function computeDominantDirection(trajectories) {
     // receptor marker
     L.circleMarker(e.latlng, { radius: 5 }).addTo(trajLayerGroup);
 
+    try {
+      // 1) Update wind from Open-Meteo at this click location
+      await updateWindFromOpenMeteo(lat, lng);
+  
+      // 2) Now compute trajectories using that wind
+      const trajectories = await computeEnsembleTrajectories(lat, lng, {
+        nParticles: 8,
+        hoursBack: 2,
+        dtMinutes: 10
+      });
+  
+      const footprint = buildFootprint(trajectories);
+      const dom = computeDominantDirection(trajectories);
+  
+      drawTrajectories(trajectories);
+      drawFootprint(footprint);
+  
+      const popupHtml = `
+        <b>Air origin (last ~2 hours)</b><br/>
+        Dominant upwind sector: <b>${dom.sector ?? "N/A"}</b><br/>
+        Mean wind-from direction: ${
+          dom.meanBearing !== null
+            ? dom.meanBearing.toFixed(0) + "&deg;"
+            : "N/A"
+        }<br/>
+        Ensemble members: ${dom.samples}
+      `;
+      // popup...
+
+    
     try {
       // you can tweak these numbers later
       const trajectories = await computeEnsembleTrajectories(lat, lng, {
