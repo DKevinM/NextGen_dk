@@ -213,30 +213,20 @@ window.purpleFCReady = (async () => {
   try {
     const res  = await fetch("https://raw.githubusercontent.com/DKevinM/AB_datapull/main/data/ACA_PM25_map.json");
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
     const json = await res.json();
 
-    const arr  = Array.isArray(json) ? json
-               : json.data            ? json.data
-               : json.features        ? json.features
-               : Object.values(json || {});
+    // Use the flexible helper so it works whether the file is an array,
+    // an object with .data/.features, and whether it uses lat/Lat/Latitude, etc.
+    window.PURPLE_FC = toPointFC(json);
 
-    window.PURPLE_FC = {
-      type: "FeatureCollection",
-      features: arr.map(r => ({
-        type: "Feature",
-        properties: { ...r },
-        geometry: { type: "Point", coordinates: [ +r.lon, +r.lat ] }
-      })).filter(f =>
-        Number.isFinite(f.geometry.coordinates[0]) &&
-        Number.isFinite(f.geometry.coordinates[1])
-      )
-    };
     console.log("[origin] PURPLE_FC features:", window.PURPLE_FC.features.length);
   } catch (e) {
     console.error("[origin] purpleFCReady failed", e);
     window.PURPLE_FC = { type: "FeatureCollection", features: [] };
   }
 })();
+
 
 // 3) NPRI
 window.npriFCReady = (async () => {
