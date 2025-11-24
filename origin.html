@@ -131,26 +131,6 @@
   }
 
 
-  // Global FCs filled once origin-data.js finishes
-  let STATIONS_FC = { type:'FeatureCollection', features: [] };
-  let PURPLE_FC   = { type:'FeatureCollection', features: [] };
-  let NPRI_FC     = { type:'FeatureCollection', features: [] };
-  
-  // Kick off loading
-  Promise.all([
-    window.stationsFCReady,
-    window.purpleFCReady,
-    window.npriFCReady
-  ]).then(([stn, pa, npri]) => {
-    STATIONS_FC = stn || STATIONS_FC;
-    PURPLE_FC   = pa  || PURPLE_FC;
-    NPRI_FC     = npri|| NPRI_FC;
-    console.log('[origin] sources ready:',
-      STATIONS_FC.features.length, 'stations,',
-      PURPLE_FC.features.length, 'purple,',
-      NPRI_FC.features.length, 'npri');
-  });
-
 
 // which points in footprints of wind.  
 // Helper to pull lat/lon from either geometry or properties
@@ -396,6 +376,19 @@ function pointsInFootprint(srcFC, cells, radiusKm = 20) {
   map.on("click", async (e) => {
     const { lat, lng } = e.latlng;
 
+    // Make sure the feature collections have finished loading
+    await window.stationsFCReady;
+    await window.purpleFCReady;
+    await window.npriFCReady;
+
+    console.log(
+      "[origin click] FC sizes:",
+      window.STATIONS_FC.features.length, "stations,",
+      window.PURPLE_FC.features.length,   "purple,",
+      window.NPRI_FC.features.length,     "npri"
+    );
+
+
     // Clear previous trajectories/footprints
     trajLayerGroup.clearLayers();
 
@@ -426,24 +419,11 @@ function pointsInFootprint(srcFC, cells, radiusKm = 20) {
       drawTrajectories(trajectories);
       drawFootprint(footprint);
 
-      // 4) Make sure all three datasets are loaded
-      await Promise.all([
-        window.stationsFCReady?.catch(() => null),
-        window.purpleFCReady?.catch(() => null),
-        window.npriFCReady?.catch(() => null)
-      ]);
-
-      console.log(
-        "[origin] sources ready:",
-        STATIONS_FC?.features?.length ?? 0, "stations,",
-        PURPLE_FC?.features?.length ?? 0, "purple,",
-        NPRI_FC?.features?.length ?? 0, "npri"
-      );
-
       // 5) Search for upwind sources within the footprint
-      const stationHits = pointsInFootprint(STATIONS_FC, footprint, 20); // ~20 km
-      const purpleHits  = pointsInFootprint(PURPLE_FC,   footprint, 20);
-      const npriHits    = pointsInFootprint(NPRI_FC,     footprint, 15);
+      const stationHits = pointsInFootprint(window.STATIONS_FC, footprint, 20); // ~20 km
+      const purpleHits  = pointsInFootprint(window.PURPLE_FC,   footprint, 20);
+      const npriHits    = pointsInFootprint(window.NPRI_FC,     footprint, 15);
+
 
       // ----- AQ stations text -----
       let stationLines = "Aucun";
