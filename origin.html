@@ -392,110 +392,76 @@ function pointsInFootprint(srcFC, cells, radiusKm = 20) {
       drawTrajectories(trajectories);
       drawFootprint(footprint);
 
+      // 4) Make sure all three datasets are loaded
+      await Promise.all([
+        window.stationsFCReady?.catch(() => null),
+        window.purpleFCReady?.catch(() => null),
+        window.npriFCReady?.catch(() => null)
+      ]);
 
-      // Upwind hits (you can tune radii later)
-      const stnHits  = pointsInFootprint(footprint, STATIONS_FC, 20); // 20 km
-      const paHits   = pointsInFootprint(footprint, PURPLE_FC,   20);
-      const npriHits = pointsInFootprint(footprint, NPRI_FC,     15);
-      
-      // Build HTML lists
-      function listItems(arr, labelFn) {
-        if (!arr.length) return '<i>Aucun</i>';
-        return '<ul>' + arr.map(labelFn).join('') + '</ul>';
+      console.log(
+        "[origin] sources ready:",
+        STATIONS_FC?.features?.length ?? 0, "stations,",
+        PURPLE_FC?.features?.length ?? 0, "purple,",
+        NPRI_FC?.features?.length ?? 0, "npri"
+      );
+
+      // 5) Search for upwind sources within the footprint
+      const stationHits = pointsInFootprint(STATIONS_FC, footprint, 20); // ~20 km
+      const purpleHits  = pointsInFootprint(PURPLE_FC,   footprint, 20);
+      const npriHits    = pointsInFootprint(NPRI_FC,     footprint, 15);
+
+      // ----- AQ stations text -----
+      let stationLines = "Aucun";
+      if (stationHits.length) {
+        stationLines = stationHits
+          .slice(0, 3)
+          .map(h => {
+            const p   = h.feature.properties || {};
+            const nm  = p.stationName || p.StationName || "Station";
+            let aq    = p.aqhi ?? p.AQHI ?? "N/A";
+            if (!isNaN(+aq)) {
+              aq = +aq > 10 ? "10+" : aq;
+            }
+            const dkm = h.dist_km.toFixed(1);
+            return `${nm} — AQHI: ${aq} (≈${dkm} km)`;
+          })
+          .join("<br>");
       }
-      
-      const stationHtml = listItems(stnHits, f => {
-        const p = f.properties || {};
-        const aqhi = (p.aqhi !== undefined && !isNaN(+p.aqhi))
-          ? (p.aqhi > 10 ? '10+' : p.aqhi)
-          : 'N/D';
-        return `<li><b>${p.stationName || 'Station'}</b> — AQHI: ${aqhi}</li>`;
-      });
-      
-      const paHtml = listItems(paHits, f => {
-        const p = f.properties || {};
-        const name = p.name || p.label || 'Capteur PurpleAir';
-        const pm  = p.pm25 || p['pm2.5'] || p.PM2_5 || 'N/D';
-        return `<li><b>${name}</b> — PM2.5: ${pm}</li>`;
-      });
-      
-      const npriHtml = listItems(npriHits, f => {
-        const p = f.properties || {};
-        const company  = p.COMPANY_NAME || p.company || p.Owner || '';
-        const facility = p.FACILITY_NAME || p.facility || p.Name || '';
-        const sector   = p.SECTOR || p.sector || '';
-        const title = facility || company || 'Installation NPRI';
-        const extra = [company, sector].filter(Boolean).join(' — ');
-        return `<li><b>${title}</b>${extra ? ' (' + extra + ')' : ''}</li>`;
-      });
 
-      // Make sure all three datasets are loaded
-    await Promise.all([
-      window.stationsFCReady?.catch(() => null),
-      window.purpleFCReady?.catch(() => null),
-      window.npriFCReady?.catch(() => null)
-    ]);
-    
-    console.log(
-      "[origin] sources ready:",
-      window.STATIONS_FC?.features?.length ?? 0, "stations,",
-      window.PURPLE_FC?.features?.length ?? 0, "purple,",
-      window.NPRI_FC?.features?.length ?? 0, "npri"
-    );
-    
-    // Search for upwind sources within the footprint
-    const stationHits = pointsInFootprint(window.STATIONS_FC, footprint, 20);
-    const purpleHits  = pointsInFootprint(window.PURPLE_FC,   footprint, 20);
-    const npriHits    = pointsInFootprint(window.NPRI_FC,     footprint, 15);
-    
-    // ----- AQ stations text -----
-    let stationLines = "Aucun";
-    if (stationHits.length) {
-      stationLines = stationHits
-        .slice(0, 3)
-        .map(h => {
-          const p   = h.feature.properties || {};
-          const nm  = p.stationName || p.StationName || "Station";
-          const aq  = p.aqhi ?? p.AQHI ?? "N/A";
-          const dkm = h.dist_km.toFixed(1);
-          return `${nm} — AQHI: ${aq} (≈${dkm} km)`;
-        })
-        .join("<br>");
-    }
-    
-    // ----- PurpleAir text -----
-    let purpleLines = "Aucun";
-    if (purpleHits.length) {
-      purpleLines = purpleHits
-        .slice(0, 3)
-        .map(h => {
-          const p   = h.feature.properties || {};
-          const nm  = p.name || p.Label || p.label || "PurpleAir";
-          const pm  = p.pm25 ?? p.PM2_5 ?? p["pm2.5"] ?? "N/A";
-          const dkm = h.dist_km.toFixed(1);
-          return `${nm} — PM2.5: ${pm} µg/m³ (≈${dkm} km)`;
-        })
-        .join("<br>");
-    }
-    
-    // ----- NPRI text -----
-    let npriLines = "Aucun";
-    if (npriHits.length) {
-      npriLines = npriHits
-        .slice(0, 3)
-        .map(h => {
-          const p   = h.feature.properties || {};
-          const fac = p.FACILITY_NAME || p.FacilityName || p.facility || "Facility";
-          const co  = p.COMPANY_NAME  || p.Company      || p.company  || "";
-          const yr  = p.REPORTING_YEAR || p.ReportingYear || p.year || "";
-          const dkm = h.dist_km.toFixed(1);
-          const label = co ? `${fac} (${co})` : fac;
-          return `${label} — ${yr ? "Year " + yr + ", " : ""}≈${dkm} km upwind`;
-        })
-        .join("<br>");
-    }
+      // ----- PurpleAir text -----
+      let purpleLines = "Aucun";
+      if (purpleHits.length) {
+        purpleLines = purpleHits
+          .slice(0, 3)
+          .map(h => {
+            const p   = h.feature.properties || {};
+            const nm  = p.name || p.Label || p.label || "PurpleAir";
+            const pm  = p.pm25 ?? p.PM2_5 ?? p["pm2.5"] ?? "N/A";
+            const dkm = h.dist_km.toFixed(1);
+            return `${nm} — PM2.5: ${pm} µg/m³ (≈${dkm} km)`;
+          })
+          .join("<br>");
+      }
 
-      // 4) Popup summary
+      // ----- NPRI text -----
+      let npriLines = "Aucun";
+      if (npriHits.length) {
+        npriLines = npriHits
+          .slice(0, 3)
+          .map(h => {
+            const p   = h.feature.properties || {};
+            const fac = p.FACILITY_NAME || p.FacilityName || p.facility || "Installation NPRI";
+            const co  = p.COMPANY_NAME  || p.Company      || p.company  || "";
+            const yr  = p.REPORTING_YEAR || p.ReportingYear || p.year || "";
+            const dkm = h.dist_km.toFixed(1);
+            const label = co ? `${fac} (${co})` : fac;
+            return `${label} — ${yr ? "Year " + yr + ", " : ""}≈${dkm} km upwind`;
+          })
+          .join("<br>");
+      }
+
+      // 6) Popup summary
       const popupHtml = `
         <b>Air origin (last ~2 hours)</b><br/>
         Dominant upwind sector: <b>${dom.sector ?? "N/A"}</b><br/>
@@ -504,15 +470,14 @@ function pointsInFootprint(srcFC, cells, radiusKm = 20) {
             ? dom.meanBearing.toFixed(0) + "&deg;"
             : "N/A"
         }<br/>
-      Ensemble members: ${dom.samples}<br/><br/>
-      <b>Upwind AQ stations (~20 km):</b><br/>
-      ${stationLines}<br/><br/>
-      <b>Upwind PurpleAir sensors (~20 km):</b><br/>
-      ${purpleLines}<br/><br/>
-      <b>Upwind NPRI facilities (~15 km):</b><br/>
-      ${npriLines}
+        Ensemble members: ${dom.samples}<br/><br/>
+        <b>Upwind AQ stations (~20 km):</b><br/>
+        ${stationLines}<br/><br/>
+        <b>Upwind PurpleAir sensors (~20 km):</b><br/>
+        ${purpleLines}<br/><br/>
+        <b>Upwind NPRI facilities (~15 km):</b><br/>
+        ${npriLines}
       `;
-
 
       L.popup()
         .setLatLng(e.latlng)
@@ -524,6 +489,7 @@ function pointsInFootprint(srcFC, cells, radiusKm = 20) {
       alert("Could not compute trajectories. Check console for details.");
     }
   });
+
 </script>
 
 </body>
