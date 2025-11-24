@@ -52,6 +52,14 @@
   crossorigin="">
 </script>
 
+<!-- Esri Leaflet (for NPRI query) -->
+<script src="https://unpkg.com/esri-leaflet@3.0.11/dist/esri-leaflet.js"
+        integrity="sha512-..." crossorigin=""></script>
+
+<!-- Your shared data loader -->
+<script src="origin-data.js"></script>
+
+  
 <script>
   // ─────────────────────────────────────────
   // Map setup
@@ -126,6 +134,65 @@
     return lastWind;
   }
 
+
+  // Global FCs filled once origin-data.js finishes
+  let STATIONS_FC = { type:'FeatureCollection', features: [] };
+  let PURPLE_FC   = { type:'FeatureCollection', features: [] };
+  let NPRI_FC     = { type:'FeatureCollection', features: [] };
+  
+  // Kick off loading
+  Promise.all([
+    window.stationsFCReady,
+    window.purpleFCReady,
+    window.npriFCReady
+  ]).then(([stn, pa, npri]) => {
+    STATIONS_FC = stn || STATIONS_FC;
+    PURPLE_FC   = pa  || PURPLE_FC;
+    NPRI_FC     = npri|| NPRI_FC;
+    console.log('[origin] sources ready:',
+      STATIONS_FC.features.length, 'stations,',
+      PURPLE_FC.features.length, 'purple,',
+      NPRI_FC.features.length, 'npri');
+  });
+
+
+  function pointsInFootprint(footprintCells, fc, radiusKm = 10) {
+    if (!fc || !fc.features?.length) return [];
+  
+    const R = 6371; // km
+    const toRad = x => x * Math.PI / 180;
+  
+    function haversine(lat1, lon1, lat2, lon2) {
+      const dlat = toRad(lat2 - lat1);
+      const dlon = toRad(lon2 - lon1);
+      const a = Math.sin(dlat / 2) ** 2 +
+                Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+                Math.sin(dlon / 2) ** 2;
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c;
+    }
+  
+    const hits = [];
+  
+    for (const src of fc.features) {
+      const [lon, lat] = src.geometry.coordinates;
+      let hit = false;
+  
+      for (const cell of footprintCells) {
+        const d = haversine(lat, lon, cell.lat, cell.lon);
+        if (d <= radiusKm) {
+          hit = true;
+          break;
+        }
+      }
+  
+      if (hit) hits.push(src);
+    }
+  
+    return hits;
+  }
+
+  
   // ─────────────────────────────────────────
   // Trajectory math helpers (JS versions)
   // ─────────────────────────────────────────
@@ -319,6 +386,44 @@
       drawTrajectories(trajectories);
       drawFootprint(footprint);
 
+
+      // Upwind hits (you can tune radii later)
+      const stnHits  = pointsInFootprint(footprint, STATIONS_FC, 20); // 20 km
+      const paHits   = pointsInFootprint(footprint, PURPLE_FC,   20);
+      const npriHits = pointsInFootprint(footprint, NPRI_FC,     15);
+      
+      // Build HTML lists
+      function listItems(arr, labelFn) {
+        if (!arr.length) return '<i>Aucun</i>';
+        return '<ul>' + arr.map(labelFn).join('') + '</ul>';
+      }
+      
+      const stationHtml = listItems(stnHits, f => {
+        const p = f.properties || {};
+        const aqhi = (p.aqhi !== undefined && !isNaN(+p.aqhi))
+          ? (p.aqhi > 10 ? '10+' : p.aqhi)
+          : 'N/D';
+        return `<li><b>${p.stationName || 'Station'}</b> — AQHI: ${aqhi}</li>`;
+      });
+      
+      const paHtml = listItems(paHits, f => {
+        const p = f.properties || {};
+        const name = p.name || p.label || 'Capteur PurpleAir';
+        const pm  = p.pm25 || p['pm2.5'] || p.PM2_5 || 'N/D';
+        return `<li><b>${name}</b> — PM2.5: ${pm}</li>`;
+      });
+      
+      const npriHtml = listItems(npriHits, f => {
+        const p = f.properties || {};
+        const company  = p.COMPANY_NAME || p.company || p.Owner || '';
+        const facility = p.FACILITY_NAME || p.facility || p.Name || '';
+        const sector   = p.SECTOR || p.sector || '';
+        const title = facility || company || 'Installation NPRI';
+        const extra = [company, sector].filter(Boolean).join(' — ');
+        return `<li><b>${title}</b>${extra ? ' (' + extra + ')' : ''}</li>`;
+      });
+
+      
       // 4) Popup summary
       const popupHtml = `
         <b>Air origin (last ~2 hours)</b><br/>
@@ -328,8 +433,18 @@
             ? dom.meanBearing.toFixed(0) + "&deg;"
             : "N/A"
         }<br/>
-        Ensemble members: ${dom.samples}
+        Ensemble members: ${dom.samples}<br/>
+        <hr>
+        <b>Upwind AQ stations (~20 km):</b><br/>
+        ${stationHtml}
+        <hr>
+        <b>Upwind PurpleAir sensors (~20 km):</b><br/>
+        ${paHtml}
+        <hr>
+        <b>Upwind NPRI facilities (~15 km):</b><br/>
+        ${npriHtml}
       `;
+
 
       L.popup()
         .setLatLng(e.latlng)
