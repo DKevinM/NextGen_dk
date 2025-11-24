@@ -153,6 +153,53 @@
 
 
 // which points in footprints of wind.  
+// Helper to pull lat/lon from either geometry or properties
+function getFeatureLatLon(src) {
+  if (!src) return null;
+
+  // 1) If we have a proper GeoJSON Point geometry
+  if (src.geometry && src.geometry.type === "Point") {
+    const coords = src.geometry.coordinates || [];
+    const lon = Number(coords[0]);
+    const lat = Number(coords[1]);
+    if (Number.isFinite(lat) && Number.isFinite(lon)) {
+      return { lat, lon };
+    }
+  }
+
+  // 2) Fall back to properties-based coords
+  const p = src.properties || {};
+
+  const candLat =
+    p.lat ??
+    p.latitude ??
+    p.Latitude ??
+    p.LATITUDE ??
+    p.LAT ??
+    p.y ??
+    p.Y;
+
+  const candLon =
+    p.lon ??
+    p.lng ??
+    p.longitude ??
+    p.Longitude ??
+    p.LONGITUDE ??
+    p.LON ??
+    p.x ??
+    p.X;
+
+  const lat = Number(candLat);
+  const lon = Number(candLon);
+
+  if (Number.isFinite(lat) && Number.isFinite(lon)) {
+    return { lat, lon };
+  }
+
+  return null;
+}
+
+// which points are within radiusKm of *any* footprint cell
 function pointsInFootprint(srcFC, cells, radiusKm = 20) {
   if (!srcFC || !Array.isArray(srcFC.features) || !cells?.length) {
     return [];
@@ -161,24 +208,10 @@ function pointsInFootprint(srcFC, cells, radiusKm = 20) {
   const hits = [];
 
   for (const src of srcFC.features) {
-    if (!src || !src.geometry) continue;
+    const ll = getFeatureLatLon(src);
+    if (!ll) continue;
 
-    let pt;
-    try {
-      if (src.geometry.type === "Point") {
-        const coords = src.geometry.coordinates || [];
-        const lon = Number(coords[0]);
-        const lat = Number(coords[1]);
-        if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
-        pt = turf.point([lon, lat]);
-      } else {
-        // Polygon / MultiPolygon, etc.
-        pt = turf.centroid(src);
-      }
-    } catch (e) {
-      console.warn("[pointsInFootprint] bad geometry, skipping feature:", e);
-      continue;
-    }
+    const pt = turf.point([ll.lon, ll.lat]);
 
     let best = Infinity;
     for (const cell of cells) {
@@ -195,6 +228,7 @@ function pointsInFootprint(srcFC, cells, radiusKm = 20) {
   hits.sort((a, b) => a.dist_km - b.dist_km);
   return hits;
 }
+
 
 
 
