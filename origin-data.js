@@ -179,81 +179,85 @@ window.fetchAllStationData = function () {
   return Promise.resolve(results);
 };
 
-// Build a FeatureCollection for stations
+
+// Global FeatureCollections
+window.STATIONS_FC = { type: "FeatureCollection", features: [] };
+window.PURPLE_FC   = { type: "FeatureCollection", features: [] };
+window.NPRI_FC     = { type: "FeatureCollection", features: [] };
+
+// 1) Stations
 window.stationsFCReady = (async () => {
   try {
-    await window.dataReady;
+    await window.dataReady;               // your last6h.csv loader
     const rows = await window.fetchAllStationData();
-    return {
-      type: 'FeatureCollection',
-      features: (rows || []).map(r => ({
-        type: 'Feature',
-        properties: { ...r, sourceType: 'station' },
-        geometry: { type: 'Point', coordinates: [r.lon, r.lat] }
-      }))
+
+    window.STATIONS_FC = {
+      type: "FeatureCollection",
+      features: (rows || [])
+        .filter(r => isFinite(+r.lat) && isFinite(+r.lon))
+        .map(r => ({
+          type: "Feature",
+          properties: { ...r },
+          geometry: { type: "Point", coordinates: [ +r.lon, +r.lat ] }
+        }))
     };
+    console.log("[origin] STATIONS_FC features:", window.STATIONS_FC.features.length);
   } catch (e) {
-    console.error('[stationsFCReady] failed', e);
-    return { type: 'FeatureCollection', features: [] };
+    console.error("[origin] stationsFCReady failed", e);
+    window.STATIONS_FC = { type: "FeatureCollection", features: [] };
   }
 })();
 
-// ----------------- 2) PurpleAir -----------------
-
+// 2) PurpleAir
 window.purpleFCReady = (async () => {
   try {
-    const res = await fetch('https://raw.githubusercontent.com/DKevinM/AB_datapull/main/data/ACA_PM25_map.json');
+    const res  = await fetch("https://raw.githubusercontent.com/DKevinM/AB_datapull/main/data/ACA_PM25_map.json");
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json();
-    const fc = toPointFC(json);
-    fc.features.forEach(f => {
-      f.properties.sourceType = 'purpleair';
-    });
-    return fc;
+
+    const arr  = Array.isArray(json) ? json
+               : json.data            ? json.data
+               : json.features        ? json.features
+               : Object.values(json || {});
+
+    window.PURPLE_FC = {
+      type: "FeatureCollection",
+      features: arr.map(r => ({
+        type: "Feature",
+        properties: { ...r },
+        geometry: { type: "Point", coordinates: [ +r.lon, +r.lat ] }
+      })).filter(f =>
+        Number.isFinite(f.geometry.coordinates[0]) &&
+        Number.isFinite(f.geometry.coordinates[1])
+      )
+    };
+    console.log("[origin] PURPLE_FC features:", window.PURPLE_FC.features.length);
   } catch (e) {
-    console.error('[purpleFCReady] failed', e);
-    return { type:'FeatureCollection', features: [] };
+    console.error("[origin] purpleFCReady failed", e);
+    window.PURPLE_FC = { type: "FeatureCollection", features: [] };
   }
 })();
 
-
-// ----------------- 3) NPRI via direct ArcGIS REST → GeoJSON -----------------
-
-const NPRI_REST_URL = 'https://maps-cartes.ec.gc.ca/arcgis/rest/services/STB_DGST/NPRI/MapServer';
-
+// 3) NPRI
 window.npriFCReady = (async () => {
   try {
-    const base = `${NPRI_REST_URL}/0/query`;
-    const params = new URLSearchParams({
-      where: '1=1',
-      outFields: '*',
-      returnGeometry: 'true',
-      outSR: '4326',
-      f: 'geojson',
-      returnExceededLimitFeatures: 'true'
-    });
-
-    const url = `${base}?${params.toString()}`;
-    console.log('[NPRI] GET', url);
-
+    const url = "https://maps-cartes.ec.gc.ca/arcgis/rest/services/STB_DGST/NPRI/MapServer/0/query" +
+                "?where=1=1&outFields=*&f=geojson&returnGeometry=true&outSR=4326";
+    console.log("[origin] NPRI GET", url);
     const res = await fetch(url);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const gj  = await res.json();
 
-    const gj = await res.json();
-    const fc = gj.type === 'FeatureCollection'
-      ? gj
-      : { type: 'FeatureCollection', features: gj.features || [] };
-
-    (fc.features || []).forEach(f => {
-      if (!f.properties) f.properties = {};
-      f.properties.sourceType = 'npri';
-    });
-
-    console.log('[NPRI] loaded features:', fc.features.length);
-    return fc;
+    const feats = Array.isArray(gj.features) ? gj.features : [];
+    // ensure type/coords are sane
+    window.NPRI_FC = {
+      type: "FeatureCollection",
+      features: feats.filter(f => f && f.geometry)
+    };
+    console.log("[origin] NPRI_FC features:", window.NPRI_FC.features.length);
   } catch (e) {
-    console.error('[npriFCReady] failed', e);
-    return { type: 'FeatureCollection', features: [] };
+    console.error("[origin] npriFCReady failed", e);
+    window.NPRI_FC = { type: "FeatureCollection", features: [] };
   }
 })();
 
