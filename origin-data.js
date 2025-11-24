@@ -216,26 +216,44 @@ window.purpleFCReady = (async () => {
   }
 })();
 
-// ----------------- 3) NPRI via Esri Leaflet -----------------
+
+// ----------------- 3) NPRI via direct ArcGIS REST → GeoJSON -----------------
 
 const NPRI_REST_URL = 'https://maps-cartes.ec.gc.ca/arcgis/rest/services/STB_DGST/NPRI/MapServer';
 
 window.npriFCReady = (async () => {
   try {
-    // requires esri-leaflet to be loaded in origin.html
-    const fc = await new Promise((resolve, reject) => {
-      L.esri.query({ url: `${NPRI_REST_URL}/0` })
-        .where('1=1')
-        .fields(['*'])
-        .returnGeometry(true)
-        .run((err, geojson) => err ? reject(err) : resolve(geojson));
+    const base = `${NPRI_REST_URL}/0/query`;
+    const params = new URLSearchParams({
+      where: '1=1',
+      outFields: '*',
+      returnGeometry: 'true',
+      outSR: '4326',
+      f: 'geojson',
+      returnExceededLimitFeatures: 'true'
     });
-    fc.features.forEach(f => {
+
+    const url = `${base}?${params.toString()}`;
+    console.log('[NPRI] GET', url);
+
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const gj = await res.json();
+    const fc = gj.type === 'FeatureCollection'
+      ? gj
+      : { type: 'FeatureCollection', features: gj.features || [] };
+
+    (fc.features || []).forEach(f => {
+      if (!f.properties) f.properties = {};
       f.properties.sourceType = 'npri';
     });
+
+    console.log('[NPRI] loaded features:', fc.features.length);
     return fc;
   } catch (e) {
     console.error('[npriFCReady] failed', e);
-    return { type:'FeatureCollection', features: [] };
+    return { type: 'FeatureCollection', features: [] };
   }
 })();
+
