@@ -152,41 +152,54 @@
   });
 
 
-  function pointsInFootprint(footprintCells, fc, radiusKm = 10) {
-    if (!fc || !fc.features?.length) return [];
-  
-    const R = 6371; // km
-    const toRad = x => x * Math.PI / 180;
-  
-    function haversine(lat1, lon1, lat2, lon2) {
-      const dlat = toRad(lat2 - lat1);
-      const dlon = toRad(lon2 - lon1);
-      const a = Math.sin(dlat / 2) ** 2 +
-                Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
-                Math.sin(dlon / 2) ** 2;
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-      return R * c;
+  // srcFC: FeatureCollection of stations / NPRI / PurpleAir
+  // cells: array of footprint cells: [{lat, lon, count}, ...]
+  // radiusKm: search radius (e.g. 20 for 20 km)
+  function pointsInFootprint(srcFC, cells, radiusKm = 20) {
+    if (!srcFC || !Array.isArray(srcFC.features) || !cells?.length) {
+      return [];
     }
   
     const hits = [];
   
-    for (const src of fc.features) {
-      const [lon, lat] = src.geometry.coordinates;
-      let hit = false;
+    for (const src of srcFC.features) {
+      if (!src || !src.geometry) continue;  // <-- guard against null geometry
   
-      for (const cell of footprintCells) {
-        const d = haversine(lat, lon, cell.lat, cell.lon);
-        if (d <= radiusKm) {
-          hit = true;
-          break;
+      let pt;
+      try {
+        if (src.geometry.type === "Point") {
+          const coords = src.geometry.coordinates || [];
+          const lon = Number(coords[0]);
+          const lat = Number(coords[1]);
+          if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+          pt = turf.point([lon, lat]);
+        } else {
+          // e.g. Polygon, MultiPolygon — use centroid as representative point
+          pt = turf.centroid(src);
         }
+      } catch (e) {
+        console.warn("[pointsInFootprint] bad geometry, skipping feature:", e);
+        continue;
       }
   
-      if (hit) hits.push(src);
+      // Find the closest footprint cell center
+      let best = Infinity;
+      for (const cell of cells) {
+        const cellPt = turf.point([cell.lon, cell.lat]);
+        const d = turf.distance(pt, cellPt, { units: "kilometers" });
+        if (d < best) best = d;
+      }
+  
+      if (best <= radiusKm) {
+        hits.push({ feature: src, dist_km: best });
+      }
     }
   
+    // sort nearest → farthest
+    hits.sort((a, b) => a.dist_km - b.dist_km);
     return hits;
   }
+
 
   
   // ─────────────────────────────────────────
