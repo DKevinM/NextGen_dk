@@ -147,18 +147,27 @@
 // Helper to pull lat/lon from either geometry or properties
 function getFeatureLatLon(src) {
   if (!src) return null;
+  const g = src.geometry || {};
 
-  // 1) If we have a proper GeoJSON Point geometry
-  if (src.geometry && src.geometry.type === "Point") {
-    const coords = src.geometry.coordinates || [];
-    const lon = Number(coords[0]);
-    const lat = Number(coords[1]);
+  // 1) Standard GeoJSON Point
+  if (g.type === "Point" && Array.isArray(g.coordinates)) {
+    const lon = Number(g.coordinates[0]);
+    const lat = Number(g.coordinates[1]);
     if (Number.isFinite(lat) && Number.isFinite(lon)) {
       return { lat, lon };
     }
   }
 
-  // 2) Fall back to properties-based coords
+  // 2) Esri-style geometry { x: ..., y: ... }
+  if (typeof g.x === "number" && typeof g.y === "number") {
+    const lon = Number(g.x);
+    const lat = Number(g.y);
+    if (Number.isFinite(lat) && Number.isFinite(lon)) {
+      return { lat, lon };
+    }
+  }
+
+  // 3) Fallback to properties-based coords
   const p = src.properties || {};
 
   const candLat =
@@ -189,6 +198,11 @@ function getFeatureLatLon(src) {
 
   return null;
 }
+
+
+
+
+  
 
 // which points are within radiusKm of *any* footprint cell
 function pointsInFootprint(srcFC, cells, radiusKm = 20) {
@@ -503,23 +517,14 @@ function pointsInFootprint(srcFC, cells, radiusKm = 20) {
           .map(h => {
             const p   = h.feature.properties || {};
             const nm  = p.name || p.Label || p.label || "PurpleAir";
-      
-            // Prefer corrected PM, with several fallbacks
-            const pmRaw =
-              p.pm_corr ??
-              p.pm25 ??
-              p.PM2_5 ??
-              p["pm2.5"] ??
-              p.pm ??
-              null;
-      
-            const pm  = (pmRaw !== null && !isNaN(+pmRaw)) ? +pmRaw.toFixed(1) : "N/A";
+            // NEW: prefer pm_corr, then fallback
+            const pm  = p.pm_corr ?? p.pm25 ?? p.PM2_5 ?? p["pm2.5"] ?? "N/A";
             const dkm = h.dist_km.toFixed(1);
-      
             return `${nm} — PM2.5: ${pm} µg/m³ (≈${dkm} km)`;
           })
           .join("<br>");
       }
+
 
 
       // ----- NPRI text -----
