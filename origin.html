@@ -426,6 +426,25 @@ function pointsInFootprint(srcFC, cells, radiusKm = 20) {
       const purpleHits  = pointsInFootprint(window.PURPLE_FC,   footprint, 20);
       const npriHits    = pointsInFootprint(window.NPRI_FC,     footprint, 15);
 
+      // Fallback: if no upwind NPRI, show nearest facilities within 50 km of receptor
+      let npriHitsFinal = npriHits;
+      if (!npriHits.length && NPRI_FC && Array.isArray(NPRI_FC.features)) {
+        const receptorPt = turf.point([lng, lat]);
+      
+        const allWithDist = NPRI_FC.features
+          .map(f => {
+            const ll = getFeatureLatLon(f);
+            if (!ll) return null;
+            const fpt = turf.point([ll.lon, ll.lat]);
+            const d   = turf.distance(receptorPt, fpt, { units: "kilometers" });
+            return { feature: f, dist_km: d };
+          })
+          .filter(Boolean)
+          .sort((a, b) => a.dist_km - b.dist_km);
+      
+        npriHitsFinal = allWithDist.filter(h => h.dist_km <= 50).slice(0, 3);
+      }
+
 
       // ----- AQ stations text -----
       let stationLines = "Aucun";
@@ -453,17 +472,29 @@ function pointsInFootprint(srcFC, cells, radiusKm = 20) {
           .map(h => {
             const p   = h.feature.properties || {};
             const nm  = p.name || p.Label || p.label || "PurpleAir";
-            const pm  = p.pm25 ?? p.PM2_5 ?? p["pm2.5"] ?? "N/A";
+      
+            // Prefer corrected PM, with several fallbacks
+            const pmRaw =
+              p.pm_corr ??
+              p.pm25 ??
+              p.PM2_5 ??
+              p["pm2.5"] ??
+              p.pm ??
+              null;
+      
+            const pm  = (pmRaw !== null && !isNaN(+pmRaw)) ? +pmRaw.toFixed(1) : "N/A";
             const dkm = h.dist_km.toFixed(1);
+      
             return `${nm} — PM2.5: ${pm} µg/m³ (≈${dkm} km)`;
           })
           .join("<br>");
       }
 
+
       // ----- NPRI text -----
       let npriLines = "Aucun";
-      if (npriHits.length) {
-        npriLines = npriHits
+      if (npriHitsFinal.length) {
+        npriLines = npriHitsFinal
           .slice(0, 3)
           .map(h => {
             const p   = h.feature.properties || {};
@@ -472,10 +503,11 @@ function pointsInFootprint(srcFC, cells, radiusKm = 20) {
             const yr  = p.REPORTING_YEAR || p.ReportingYear || p.year || "";
             const dkm = h.dist_km.toFixed(1);
             const label = co ? `${fac} (${co})` : fac;
-            return `${label} — ${yr ? "Year " + yr + ", " : ""}≈${dkm} km upwind`;
+            return `${label} — ${yr ? "Year " + yr + ", " : ""}≈${dkm} km`;
           })
           .join("<br>");
       }
+
 
       // 6) Popup summary
       const popupHtml = `
