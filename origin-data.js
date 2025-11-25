@@ -251,49 +251,41 @@ window.npriFCReady = (async () => {
   }
 })();
 
-// Once NPRI_FC is ready, plot NPRI facilities on the map
+// Once NPRI_FC is ready, plot all NPRI facilities on the map
 window.npriFCReady
-  .then(fc => {
-    const coll = fc || window.NPRI_FC;
-    if (!coll || !Array.isArray(coll.features)) {
-      console.warn("[origin] No NPRI features to plot");
-      return;
-    }
+  ?.then(() => {
+    console.log("[origin] plotting NPRI facilities:", NPRI_FC.features.length);
+    npriLayerGroup.clearLayers();
 
-    console.log("[origin] Plotting NPRI facilities:", coll.features.length);
-
-    coll.features.forEach(f => {
+    (NPRI_FC.features || []).forEach(f => {
       const ll = getFeatureLatLon(f);
       if (!ll) return;
 
-      const p = f.properties || {};
+      const p   = f.properties || {};
+      const fac = p.FACILITY_NAME || p.FacilityName || p.facility || "Facility";
+      const co  = p.COMPANY_NAME  || p.Company      || p.company  || "";
+      const yr  = p.REPORTING_YEAR || p.ReportingYear || p.year || "";
+      const label = co ? `${fac} (${co})` : fac;
 
-      const fac    = p.FACILITY_NAME || p.FacilityName || p.facility || "Installation NPRI";
-      const co     = p.COMPANY_NAME  || p.Company      || p.company  || "";
-      const sector = p.SECTOR        || p.sector       || "";
-      const city   = p.CITY          || p.City         || "";
-      const prov   = p.PROVINCE      || p.Province     || "";
-
-      const title  = co ? `${fac} (${co})` : fac;
-      const loc    = [city, prov].filter(Boolean).join(", ");
-      const extra  = [sector, loc].filter(Boolean).join("<br/>");
+      const popupHtml = `
+        <b>${label}</b><br>
+        ${yr ? "Reporting year: " + yr + "<br>" : ""}
+        <small>Approx. location: ${ll.lat.toFixed(4)}, ${ll.lon.toFixed(4)}</small>
+      `;
 
       L.circleMarker([ll.lat, ll.lon], {
         radius: 4,
         color: "#800026",
         weight: 1,
-        fillColor: "#ff4d4d",
-        fillOpacity: 0.9
+        fillOpacity: 0.7
       })
-      .bindPopup(`
-        <b>${title}</b><br/>
-        ${extra}
-      `)
+      .bindPopup(popupHtml)
       .addTo(npriLayerGroup);
     });
   })
   .catch(err => {
-    console.error("[origin] Error plotting NPRI facilities:", err);
+    console.error("[origin] error plotting NPRI facilities", err);
   });
+
 
 
