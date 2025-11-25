@@ -80,6 +80,15 @@
 
   const trajLayerGroup = L.layerGroup().addTo(map);
 
+  const npriLayerGroup = L.layerGroup().addTo(map);
+
+  const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 10,
+    attribution: '&copy; OpenStreetMap contributors'
+  }).addTo(map);
+
+
+
   // ─────────────────────────────────────────
   // Global wind + Open-Meteo fetch
   // ─────────────────────────────────────────
