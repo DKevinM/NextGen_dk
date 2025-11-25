@@ -240,6 +240,13 @@ function pointsInFootprint(srcFC, cells, radiusKm = 20) {
     return (brng + 360.0) % 360.0;
   }
 
+  
+  function bearingFromStationToReceptor(stLat, stLon, rLat, rLon) {
+    // direction wind must come FROM to reach receptor from station
+    return bearingDeg(stLat, stLon, rLat, rLon);
+  }
+
+  
   function bearingToSector(bearing) {
     const labels = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
     const sectorSize = 360.0 / labels.length;
@@ -426,6 +433,22 @@ function pointsInFootprint(srcFC, cells, radiusKm = 20) {
       const purpleHits  = pointsInFootprint(window.PURPLE_FC,   footprint, 20);
       const npriHits    = pointsInFootprint(window.NPRI_FC,     footprint, 15);
 
+      
+      // Filter stationHits by wind sector specificity
+      const stationUpwind = stationHits.filter(h => {
+        const p = h.feature.properties || {};
+        const ll = getFeatureLatLon(h.feature);
+        if (!ll) return false;
+      
+        // direction from station → receptor = wind "FROM" direction
+        const brg = bearingFromStationToReceptor(ll.lat, ll.lon, lat, lng);
+        const stSector = bearingToSector(brg);
+      
+        return stSector === dom.sector;
+      });
+
+
+      
       // Fallback: if no upwind NPRI, show nearest facilities within 50 km of receptor
       let npriHitsFinal = npriHits;
       if (!npriHits.length && NPRI_FC && Array.isArray(NPRI_FC.features)) {
@@ -448,21 +471,20 @@ function pointsInFootprint(srcFC, cells, radiusKm = 20) {
 
       // ----- AQ stations text -----
       let stationLines = "Aucun";
-      if (stationHits.length) {
-        stationLines = stationHits
+      if (stationUpwind.length) {
+        stationLines = stationUpwind
           .slice(0, 3)
           .map(h => {
             const p   = h.feature.properties || {};
             const nm  = p.stationName || p.StationName || "Station";
             let aq    = p.aqhi ?? p.AQHI ?? "N/A";
-            if (!isNaN(+aq)) {
-              aq = +aq > 10 ? "10+" : aq;
-            }
+            if (!isNaN(+aq)) aq = +aq > 10 ? "10+" : aq;
             const dkm = h.dist_km.toFixed(1);
             return `${nm} — AQHI: ${aq} (≈${dkm} km)`;
           })
           .join("<br>");
       }
+
 
       // ----- PurpleAir text -----
       let purpleLines = "Aucun";
