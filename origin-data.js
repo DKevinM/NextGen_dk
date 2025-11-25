@@ -251,3 +251,49 @@ window.npriFCReady = (async () => {
   }
 })();
 
+// Once NPRI_FC is ready, plot NPRI facilities on the map
+window.npriFCReady
+  .then(fc => {
+    const coll = fc || window.NPRI_FC;
+    if (!coll || !Array.isArray(coll.features)) {
+      console.warn("[origin] No NPRI features to plot");
+      return;
+    }
+
+    console.log("[origin] Plotting NPRI facilities:", coll.features.length);
+
+    coll.features.forEach(f => {
+      const ll = getFeatureLatLon(f);
+      if (!ll) return;
+
+      const p = f.properties || {};
+
+      const fac    = p.FACILITY_NAME || p.FacilityName || p.facility || "Installation NPRI";
+      const co     = p.COMPANY_NAME  || p.Company      || p.company  || "";
+      const sector = p.SECTOR        || p.sector       || "";
+      const city   = p.CITY          || p.City         || "";
+      const prov   = p.PROVINCE      || p.Province     || "";
+
+      const title  = co ? `${fac} (${co})` : fac;
+      const loc    = [city, prov].filter(Boolean).join(", ");
+      const extra  = [sector, loc].filter(Boolean).join("<br/>");
+
+      L.circleMarker([ll.lat, ll.lon], {
+        radius: 4,
+        color: "#800026",
+        weight: 1,
+        fillColor: "#ff4d4d",
+        fillOpacity: 0.9
+      })
+      .bindPopup(`
+        <b>${title}</b><br/>
+        ${extra}
+      `)
+      .addTo(npriLayerGroup);
+    });
+  })
+  .catch(err => {
+    console.error("[origin] Error plotting NPRI facilities:", err);
+  });
+
+
