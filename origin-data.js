@@ -231,25 +231,40 @@ window.purpleFCReady = (async () => {
 // 3) NPRI
 window.npriFCReady = (async () => {
   try {
-    const url = "https://maps-cartes.ec.gc.ca/arcgis/rest/services/STB_DGST/NPRI/MapServer/0/query" +
-                "?where=1=1&outFields=*&f=geojson&returnGeometry=true&outSR=4326";
+    const url =
+      "https://maps-cartes.ec.gc.ca/arcgis/rest/services/STB_DGST/NPRI/MapServer/0/query" +
+      "?where=1=1&outFields=*&returnGeometry=true&outSR=4326&f=pjson";
+
     console.log("[origin] NPRI GET", url);
     const res = await fetch(url);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const gj  = await res.json();
+    const json = await res.json();
 
-    const feats = Array.isArray(gj.features) ? gj.features : [];
-    // ensure type/coords are sane
+    const feats = Array.isArray(json.features) ? json.features : [];
+
+    // Convert Esri JSON { attributes, geometry: {x,y} } → GeoJSON Point
     window.NPRI_FC = {
       type: "FeatureCollection",
-      features: feats.filter(f => f && f.geometry)
+      features: feats
+        .filter(f => f && f.geometry && typeof f.geometry.x === "number" && typeof f.geometry.y === "number")
+        .map(f => ({
+          type: "Feature",
+          properties: { ...(f.attributes || {}) },
+          geometry: {
+            type: "Point",
+            coordinates: [ f.geometry.x, f.geometry.y ]
+          }
+        }))
     };
+
     console.log("[origin] NPRI_FC features:", window.NPRI_FC.features.length);
   } catch (e) {
     console.error("[origin] npriFCReady failed", e);
     window.NPRI_FC = { type: "FeatureCollection", features: [] };
   }
 })();
+
+
 
 // Once NPRI_FC is ready, plot all NPRI facilities on the map
 window.npriFCReady
