@@ -486,7 +486,28 @@ function pointsInFootprint(srcFC, cells, radiusKm = 20) {
     console.log("[origin] plotted NPRI:", fc.features.length);
   }
 
+  // ─────────────────────────────────────────
+  // Once data are loaded, plot them on the map
+  // ─────────────────────────────────────────
+  Promise.all([
+    window.stationsFCReady,
+    window.purpleFCReady,
+    window.npriFCReady
+  ]).then(() => {
+    console.log(
+      "[origin] datasets loaded:",
+      window.STATIONS_FC.features.length, "stations,",
+      window.PURPLE_FC.features.length,   "purple,",
+      window.NPRI_FC.features.length,     "npri"
+    );
 
+    // draw all three layers on initial load
+    plotStations(window.STATIONS_FC);
+    plotPurple(window.PURPLE_FC);
+    plotNPRI(window.NPRI_FC);
+  }).catch(err => {
+    console.error("[origin] Promise.all error:", err);
+  });
 
   
   // ─────────────────────────────────────────
