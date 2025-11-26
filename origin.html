@@ -78,9 +78,10 @@
     opacity: 0.5
   }).addTo(map);
 
-  const trajLayerGroup = L.layerGroup().addTo(map);
-
-  const npriLayerGroup = L.layerGroup().addTo(map);
+  const trajLayerGroup    = L.layerGroup().addTo(map);  // trajectories + footprint
+  const stationLayerGroup = L.layerGroup().addTo(map);  // AQHI stations
+  const purpleLayerGroup  = L.layerGroup().addTo(map);  // PurpleAir
+  const npriLayerGroup    = L.layerGroup().addTo(map);  // NPRI facilities
 
   const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 10,
@@ -402,6 +403,92 @@ function pointsInFootprint(srcFC, cells, radiusKm = 20) {
     });
   }
 
+  
+  function plotStations(fc) {
+    stationLayerGroup.clearLayers();
+    if (!fc || !Array.isArray(fc.features)) return;
+  
+    fc.features.forEach(f => {
+      const ll = getFeatureLatLon(f);
+      if (!ll) return;
+  
+      const p  = f.properties || {};
+      const nm = p.stationName || p.StationName || "Station";
+      let aq   = p.aqhi ?? p.AQHI ?? "N/A";
+      if (!isNaN(+aq)) aq = +aq > 10 ? "10+" : aq;
+  
+      L.circleMarker([ll.lat, ll.lon], {
+        radius: 5,
+        color: "#0066cc",
+        weight: 1,
+        fillOpacity: 0.8
+      })
+        .bindPopup(`<b>${nm}</b><br>AQHI: ${aq}`)
+        .addTo(stationLayerGroup);
+    });
+  
+    console.log("[origin] plotted stations:", fc.features.length);
+  }
+  
+  function plotPurple(fc) {
+    purpleLayerGroup.clearLayers();
+    if (!fc || !Array.isArray(fc.features)) return;
+  
+    fc.features.forEach(f => {
+      const ll = getFeatureLatLon(f);
+      if (!ll) return;
+  
+      const p  = f.properties || {};
+      const nm = p.name || p.Label || p.label || "PurpleAir";
+      const pm = p.pm_corr ?? p.pm25 ?? p.PM2_5 ?? p["pm2.5"] ?? "N/A";
+  
+      L.circleMarker([ll.lat, ll.lon], {
+        radius: 4,
+        color: "#8000ff",
+        weight: 1,
+        fillOpacity: 0.7
+      })
+        .bindPopup(`<b>${nm}</b><br>PM2.5: ${pm} µg/m³`)
+        .addTo(purpleLayerGroup);
+    });
+  
+    console.log("[origin] plotted PurpleAir:", fc.features.length);
+  }
+  
+  function plotNPRI(fc) {
+    npriLayerGroup.clearLayers();
+    if (!fc || !Array.isArray(fc.features)) return;
+  
+    fc.features.forEach(f => {
+      const ll = getFeatureLatLon(f);
+      if (!ll) return;
+  
+      const p   = f.properties || {};
+      const fac = p.FACILITY_NAME || p.FacilityName || p.facility || "Facility";
+      const co  = p.COMPANY_NAME  || p.Company      || p.company  || "";
+      const yr  = p.REPORTING_YEAR || p.ReportingYear || p.year || "";
+      const label = co ? `${fac} (${co})` : fac;
+  
+      L.circleMarker([ll.lat, ll.lon], {
+        radius: 4,
+        color: "#cc0000",
+        weight: 1,
+        fillOpacity: 0.8
+      })
+        .bindPopup(`
+          <b>${label}</b><br>
+          ${yr ? "Year: " + yr + "<br>" : ""}
+          <small>${ll.lat.toFixed(4)}, ${ll.lon.toFixed(4)}</small>
+        `)
+        .addTo(npriLayerGroup);
+    });
+  
+    console.log("[origin] plotted NPRI:", fc.features.length);
+  }
+
+
+
+  
   // ─────────────────────────────────────────
   // Click handler: do everything client-side
   // ─────────────────────────────────────────
