@@ -53,6 +53,8 @@
 <!-- Turf.js (for distance, points, etc.) -->
 <script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
   
+<script src="https://unpkg.com/esri-leaflet@3.0.11/dist/esri-leaflet.js"></script>
+
 <!-- Your shared data loader -->
 <script src="origin-data.js"></script>
 
@@ -495,7 +497,7 @@ function pointsInFootprint(srcFC, cells, radiusKm = 20) {
     window.npriFCReady
   ]).then(() => {
     console.log(
-      "[origin] datasets loaded:",
+      "[origin init] FC sizes:",
       window.STATIONS_FC.features.length, "stations,",
       window.PURPLE_FC.features.length,   "purple,",
       window.NPRI_FC.features.length,     "npri"
@@ -506,7 +508,7 @@ function pointsInFootprint(srcFC, cells, radiusKm = 20) {
     plotPurple(window.PURPLE_FC);
     plotNPRI(window.NPRI_FC);
   }).catch(err => {
-    console.error("[origin] Promise.all error:", err);
+    console.error("[origin init] error plotting layers", err);
   });
 
   
