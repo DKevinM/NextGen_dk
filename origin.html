@@ -91,28 +91,29 @@
   }).addTo(map);
 
 
-  
-  const npriEsriLayer = L.esri.featureLayer({
-    url: 'https://maps-cartes.ec.gc.ca/arcgis/rest/services/STB_DGST/NPRI/MapServer/0',
-    pointToLayer: (geojson, latlng) => {
-      return L.circleMarker(latlng, {
-        radius: 4,
-        color: "#cc0000",
-        weight: 1,
-        fillOpacity: 0.8
-      });
-    },
-    onEachFeature: (feature, layer) => {
-      const p = feature.properties || {};
-      const fac = p.FACILITY_NAME || "Facility";
-      const co  = p.COMPANY_NAME  || "";
-      const yr  = p.REPORTING_YEAR || "";
-      const label = co ? `${fac} (${co})` : fac;
-      layer.bindPopup(
-        `<b>${label}</b><br>${yr ? "Year: " + yr + "<br>" : ""}`
-      );
-    }
-  }).addTo(map);
+ 
+//  const npriEsriLayer = L.esri.featureLayer({
+//    url: 'https://maps-cartes.ec.gc.ca/arcgis/rest/services/STB_DGST/NPRI/MapServer/0',
+//    pointToLayer: (geojson, latlng) => {
+//      return L.circleMarker(latlng, {
+//        radius: 4,
+//        color: "#cc0000",
+//        weight: 1,
+//        fillOpacity: 0.8
+//      });
+//    },
+//    onEachFeature: (feature, layer) => {
+//      const p = feature.properties || {};
+//      const fac = p.FACILITY_NAME || "Facility";
+//      const co  = p.COMPANY_NAME  || "";
+//      const yr  = p.REPORTING_YEAR || "";
+//      const label = co ? `${fac} (${co})` : fac;
+//      layer.bindPopup(
+//        `<b>${label}</b><br>${yr ? "Year: " + yr + "<br>" : ""}`
+//      );
+//    }
+//  }).addTo(map);
+
 
   // ─────────────────────────────────────────
   // Global wind + Open-Meteo fetch
