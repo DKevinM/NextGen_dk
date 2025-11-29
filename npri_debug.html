@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>NPRI Debug Map</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- Leaflet CSS -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+    }
+    #map {
+      width: 100%;
+      height: 100%;
+    }
+  </style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<!-- Leaflet JS -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<script>
+  // Basic map centered on central Alberta
+  const map = L.map('map').setView([53.5, -113.5], 6);
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 12,
+    attribution: '&copy; OpenStreetMap contributors'
+  }).addTo(map);
+
+  // NPRI layer group
+  const npriLayer = L.layerGroup().addTo(map);
+
+  // Helper: safely get lat/lon from GeoJSON feature
+  function getFeatureLatLon(feature) {
+    if (!feature) return null;
+    const g = feature.geometry || {};
+
+    if (g.type === "Point" && Array.isArray(g.coordinates)) {
+      const lon = Number(g.coordinates[0]);
+      const lat = Number(g.coordinates[1]);
+      if (Number.isFinite(lat) && Number.isFinite(lon)) {
+        return { lat, lon };
+      }
+    }
+
+    // Esri sometimes uses {x, y} style geometry in GeoJSON
+    if (typeof g.x === "number" && typeof g.y === "number") {
+      const lon = Number(g.x);
+      const lat = Number(g.y);
+      if (Number.isFinite(lat) && Number.isFinite(lon)) {
+        return { lat, lon };
+      }
+    }
+
+    return null;
+  }
+
+  // Fetch NPRI as GeoJSON directly from the ArcGIS REST service
+  async function loadNPRI() {
+    try {
+      const url =
+        "https://maps-cartes.ec.gc.ca/arcgis/rest/services/STB_DGST/NPRI/MapServer/0/query"
+        + "?where=1=1"
+        + "&outFields=*"
+        + "&returnGeometry=true"
+        + "&f=geojson"
+        + "&outSR=4326";
+
+      console.log("[NPRI debug] Fetching:", url);
+
+      const res = await fetch(url);
+      if (!res.ok) {
+        throw new Error("HTTP " + res.status + " " + res.statusText);
+      }
+
+      const gj = await res.json();
+      const feats = Array.isArray(gj.features) ? gj.features : [];
+      console.log("[NPRI debug] Raw feature count:", feats.length);
+
+      // Plot as simple red circle markers
+      feats.forEach(f => {
+        const ll = getFeatureLatLon(f);
+        if (!ll) return;
+
+        const p = f.properties || {};
+        const fac = p.FACILITY_NAME || p.FacilityName || p.facility || "Facility";
+        const co  = p.COMPANY_NAME  || p.Company      || p.company  || "";
+        const yr  = p.REPORTING_YEAR || p.ReportingYear || p.year || "";
+        const label = co ? `${fac} (${co})` : fac;
+
+        L.circleMarker([ll.lat, ll.lon], {
+          radius: 4,
+          color: "#cc0000",
+          weight: 1,
+          fillOpacity: 0.85
+        })
+          .bindPopup(`
+            <b>${label}</b><br>
+            ${yr ? "Year: " + yr + "<br>" : ""}
+            <small>${ll.lat.toFixed(4)}, ${ll.lon.toFixed(4)}</small>
+          `)
+          .addTo(npriLayer);
+      });
+
+      console.log("[NPRI debug] Plotted NPRI features:", npriLayer.getLayers().length);
+
+    } catch (err) {
+      console.error("[NPRI debug] Error loading NPRI:", err);
+      alert("Error loading NPRI data – see console for details.");
+    }
+  }
+
+  loadNPRI();
+</script>
+
+</body>
+</html>
