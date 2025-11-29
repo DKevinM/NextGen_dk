@@ -229,45 +229,61 @@ window.purpleFCReady = (async () => {
 
 
 
-// 3) NPRI via GeoJSON query
+// 3) NPRI
 window.NPRI_FC = { type: "FeatureCollection", features: [] };
 
 window.npriFCReady = (async () => {
   try {
     const url =
       "https://maps-cartes.ec.gc.ca/arcgis/rest/services/STB_DGST/NPRI/MapServer/0/query" +
-      "?where=1=1&outFields=*&f=geojson&returnGeometry=true&outSR=4326";
+      "?where=1=1" +
+      "&outFields=FACILITY_NAME,COMPANY_NAME,REPORTING_YEAR" +
+      "&returnGeometry=true" +
+      "&outSR=4326" +
+      "&f=json";   // <-- Esri JSON, NOT geojson
 
+    console.log("[origin] NPRI GET", url);
     const res = await fetch(url);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
-    const gj = await res.json();
-    const feats = Array.isArray(gj.features) ? gj.features : [];
+    const js = await res.json();
 
-    // keep only features with valid point coordinates
+    const feats = (js.features || [])
+      .map(f => {
+        const g = f.geometry || {};
+        const attrs = f.attributes || {};
+
+        // Esri point geometry is { x: lon, y: lat }
+        const x = Number(g.x);
+        const y = Number(g.y);
+        if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+
+        return {
+          type: "Feature",
+          geometry: {
+            type: "Point",
+            coordinates: [x, y]
+          },
+          properties: {
+            FACILITY_NAME: attrs.FACILITY_NAME,
+            COMPANY_NAME:  attrs.COMPANY_NAME,
+            REPORTING_YEAR: attrs.REPORTING_YEAR
+          }
+        };
+      })
+      .filter(Boolean);
+
     window.NPRI_FC = {
       type: "FeatureCollection",
-      features: feats.filter(f => {
-        const g = f && f.geometry;
-        return (
-          g &&
-          g.type === "Point" &&
-          Array.isArray(g.coordinates) &&
-          Number.isFinite(+g.coordinates[0]) &&
-          Number.isFinite(+g.coordinates[1])
-        );
-      })
+      features: feats
     };
 
-    console.log("[origin] NPRI_FC features:", window.NPRI_FC.features.length);
+    console.log("[origin] NPRI_FC features:", feats.length);
   } catch (e) {
     console.error("[origin] npriFCReady failed", e);
     window.NPRI_FC = { type: "FeatureCollection", features: [] };
   }
 })();
-
-
-
 
 
 
