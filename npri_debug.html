@@ -61,6 +61,14 @@
             border-radius: 8px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.2);
             z-index: 1000;
+            max-width: 400px;
+        }
+
+        .sector-progress {
+            margin: 10px 0;
+            padding: 5px;
+            background: #f8f9fa;
+            border-radius: 4px;
         }
     </style>
 </head>
@@ -74,14 +82,15 @@
 
     <div id="loading" class="loading">
         <h3>Loading NPRI Data...</h3>
-        <p>Fetching all Alberta facilities (this may take up to 30 seconds)...</p>
-        <div id="progress">Starting...</div>
+        <p>Fetching facilities by sector (this will take 1-2 minutes)...</p>
+        <div id="progress">Initializing...</div>
+        <div id="sectorProgress"></div>
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
         // Initialize the map centered on Alberta
-        const map = L.map('map').setView([54.5, -115], 6);
+        const map = L.map('map').setView([53.5, -114], 6);
 
         // Add base tile layer
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -90,181 +99,194 @@
 
         const loadingDiv = document.getElementById('loading');
         const progressDiv = document.getElementById('progress');
+        const sectorProgressDiv = document.getElementById('sectorProgress');
 
-        // Function to fetch ALL paginated data
-        async function fetchAllNPRIAlbertaData() {
-            let allFeatures = [];
-            let offset = 0;
-            const batchSize = 1000; // Maximum features per request
-            let hasMoreData = true;
-            let requestCount = 0;
+        // List of major sectors to query individually
+        const sectors = [
+            'Oil and Gas',
+            'Mining',
+            'Manufacturing',
+            'Electric Power',
+            'Waste Treatment',
+            'Chemicals',
+            'Metals',
+            'Pulp and Paper',
+            'Cement'
+        ];
 
-            // First, let's try to get a count of total features
-            progressDiv.textContent = 'Checking total number of facilities...';
-            
-            const countUrl = 'https://maps-cartes.ec.gc.ca/arcgis/rest/services/STB_DGST/NPRI/MapServer/0/query?where=ProvinceCode=%27AB%27&returnCountOnly=true&f=json';
-            
-            try {
-                const countResponse = await fetch(countUrl);
-                const countData = await countResponse.json();
-                const totalFeatures = countData.count;
-                console.log(`Total Alberta facilities in database: ${totalFeatures}`);
-                progressDiv.textContent = `Found ${totalFeatures} Alberta facilities. Downloading...`;
-            } catch (error) {
-                console.log('Could not get total count, proceeding anyway...');
-            }
+        // More specific sector queries based on common NPRI sectors
+        const sectorQueries = [
+            { name: 'Conventional Oil and Gas', where: "SectorDescriptionEn LIKE '%Oil and Gas%'" },
+            { name: 'Oil Sands', where: "SectorDescriptionEn LIKE '%Oil Sands%'" },
+            { name: 'Mining', where: "SectorDescriptionEn LIKE '%Mining%'" },
+            { name: 'Electric Power', where: "SectorDescriptionEn LIKE '%Electric Power%'" },
+            { name: 'Waste Treatment', where: "SectorDescriptionEn LIKE '%Waste%'" },
+            { name: 'Chemicals', where: "SectorDescriptionEn LIKE '%Chemical%'" },
+            { name: 'Metals', where: "SectorDescriptionEn LIKE '%Metal%'" },
+            { name: 'Pulp and Paper', where: "SectorDescriptionEn LIKE '%Pulp%' OR SectorDescriptionEn LIKE '%Paper%'" },
+            { name: 'Cement', where: "SectorDescriptionEn LIKE '%Cement%'" },
+            { name: 'Other Manufacturing', where: "SectorDescriptionEn LIKE '%Manufacturing%' AND SectorDescriptionEn NOT LIKE '%Chemical%' AND SectorDescriptionEn NOT LIKE '%Metal%'" }
+        ];
 
-            // Fetch data in batches until we have everything
-            while (hasMoreData) {
-                requestCount++;
-                progressDiv.textContent = `Fetching batch ${requestCount}...`;
-                
-                const url = `https://maps-cartes.ec.gc.ca/arcgis/rest/services/STB_DGST/NPRI/MapServer/0/query?where=ProvinceCode%3D%27AB%27&outFields=*&returnGeometry=true&f=geojson&outSR=4326&resultOffset=${offset}&resultRecordCount=${batchSize}`;
-                
-                try {
-                    const response = await fetch(url);
-                    const data = await response.json();
-                    
-                    if (data.features && data.features.length > 0) {
-                        allFeatures = allFeatures.concat(data.features);
-                        offset += data.features.length;
-                        progressDiv.textContent = `Fetched ${allFeatures.length} facilities so far...`;
-                        
-                        // If we got fewer features than requested, we've reached the end
-                        if (data.features.length < batchSize) {
-                            hasMoreData = false;
-                        }
-                    } else {
-                        hasMoreData = false;
-                    }
-                    
-                    // Small delay to be respectful to the server
-                    await new Promise(resolve => setTimeout(resolve, 100));
-                    
-                } catch (error) {
-                    console.error(`Error fetching batch ${requestCount}:`, error);
-                    hasMoreData = false;
-                }
-            }
-            
-            return allFeatures;
-        }
+        // Color scheme for different sectors
+        const sectorColors = {
+            'Conventional Oil and Gas': '#e74c3c',
+            'Oil Sands': '#c0392b',
+            'Mining': '#9b59b6',
+            'Electric Power': '#3498db',
+            'Waste Treatment': '#2ecc71',
+            'Chemicals': '#f39c12',
+            'Metals': '#34495e',
+            'Pulp and Paper': '#16a085',
+            'Cement': '#d35400',
+            'Other Manufacturing': '#7f8c8d',
+            'Other': '#95a5a6'
+        };
 
-        // Alternative: Try a simpler approach with just one larger request
-        async function fetchNPRIAlbertaSimple() {
-            progressDiv.textContent = 'Fetching all Alberta facilities in one request...';
-            
-            // Try to get a larger batch - some ArcGIS servers allow up to 2000-5000
-            const url = 'https://maps-cartes.ec.gc.ca/arcgis/rest/services/STB_DGST/NPRI/MapServer/0/query?where=ProvinceCode%3D%27AB%27&outFields=*&returnGeometry=true&f=geojson&outSR=4326&resultRecordCount=5000';
+        async function fetchSectorData(sectorQuery, attempt = 1) {
+            const baseUrl = 'https://maps-cartes.ec.gc.ca/arcgis/rest/services/STB_DGST/NPRI/MapServer/0/query';
+            const whereClause = `ProvinceCode='AB' AND (${sectorQuery.where})`;
+            const url = `${baseUrl}?where=${encodeURIComponent(whereClause)}&outFields=*&returnGeometry=true&f=geojson&outSR=4326&resultRecordCount=2000`;
             
             try {
                 const response = await fetch(url);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
                 const data = await response.json();
+                
+                if (data.error) {
+                    throw new Error(data.error.message || 'API error');
+                }
+                
                 return data.features || [];
             } catch (error) {
-                console.error('Error in simple fetch:', error);
+                console.warn(`Attempt ${attempt} failed for ${sectorQuery.name}:`, error);
+                
+                if (attempt < 3) {
+                    // Wait and retry
+                    await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+                    return fetchSectorData(sectorQuery, attempt + 1);
+                }
+                
                 return [];
             }
         }
 
-        // Load and display NPRI data
-        console.log('Fetching ALL NPRI Alberta data...');
-        
-        // Try the simple approach first, then fall back to paginated if needed
-        fetchNPRIAlbertaSimple()
-            .then(features => {
-                console.log(`Simple fetch returned ${features.length} features`);
-                
-                if (features.length < 100) {
-                    // If we got very few features, try the paginated approach
-                    console.log('Too few features, trying paginated approach...');
-                    return fetchAllNPRIAlbertaData();
-                }
-                return features;
-            })
-            .then(allFeatures => {
-                console.log(`Total Alberta facilities loaded: ${allFeatures.length}`);
-                
-                if (allFeatures.length === 0) {
-                    throw new Error('No facilities were loaded');
-                }
+        async function fetchAllSectors() {
+            let allFeatures = [];
+            let completedSectors = 0;
+            const totalSectors = sectorQueries.length;
 
-                // Group by sector to see what we have
-                const sectors = {};
+            // Update progress
+            progressDiv.textContent = `Fetching data for ${totalSectors} sectors...`;
+            sectorProgressDiv.innerHTML = '';
+
+            for (const sectorQuery of sectorQueries) {
+                const sectorDiv = document.createElement('div');
+                sectorDiv.className = 'sector-progress';
+                sectorDiv.id = `sector-${sectorQuery.name.replace(/\s+/g, '-')}`;
+                sectorDiv.innerHTML = `🔄 ${sectorQuery.name}...`;
+                sectorProgressDiv.appendChild(sectorDiv);
+
+                try {
+                    const features = await fetchSectorData(sectorQuery);
+                    allFeatures = allFeatures.concat(features);
+                    
+                    // Update progress for this sector
+                    const sectorElement = document.getElementById(`sector-${sectorQuery.name.replace(/\s+/g, '-')}`);
+                    sectorElement.innerHTML = `✅ ${sectorQuery.name}: ${features.length} facilities`;
+                    
+                    // Plot these features immediately
+                    plotFeatures(features, sectorQuery.name);
+                    
+                    completedSectors++;
+                    progressDiv.textContent = `Completed ${completedSectors}/${totalSectors} sectors (${allFeatures.length} total facilities)`;
+                    
+                    // Small delay to be nice to the server
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    
+                } catch (error) {
+                    console.error(`Failed to fetch ${sectorQuery.name}:`, error);
+                    const sectorElement = document.getElementById(`sector-${sectorQuery.name.replace(/\s+/g, '-')}`);
+                    sectorElement.innerHTML = `❌ ${sectorQuery.name}: Failed`;
+                    completedSectors++;
+                }
+            }
+
+            return allFeatures;
+        }
+
+        function plotFeatures(features, sectorName) {
+            let plottedCount = 0;
+            
+            features.forEach(feature => {
+                const props = feature.properties;
+                let lat, lng;
+                
+                // Get coordinates from geometry or properties
+                if (feature.geometry && feature.geometry.type === 'Point') {
+                    [lng, lat] = feature.geometry.coordinates;
+                } else {
+                    lat = props.Latitude;
+                    lng = props.Longitude;
+                }
+                
+                // Only create marker if we have valid coordinates
+                if (lat && lng && !isNaN(lat) && !isNaN(lng)) {
+                    const color = sectorColors[sectorName] || sectorColors['Other'];
+                    
+                    L.circleMarker([lat, lng], {
+                        radius: 5,
+                        fillColor: color,
+                        color: '#2c3e50',
+                        weight: 1,
+                        opacity: 0.8,
+                        fillOpacity: 0.7
+                    })
+                    .bindPopup(createPopupContent(props))
+                    .addTo(map);
+                    
+                    plottedCount++;
+                }
+            });
+            
+            console.log(`Plotted ${plottedCount} facilities for ${sectorName}`);
+            return plottedCount;
+        }
+
+        // Start loading data
+        console.log('Starting multi-sector data fetch...');
+        
+        fetchAllSectors()
+            .then(allFeatures => {
+                console.log(`Total facilities loaded from all sectors: ${allFeatures.length}`);
+                
+                // Summary by sector
+                const sectorSummary = {};
                 allFeatures.forEach(feature => {
                     const sector = feature.properties.SectorDescriptionEn || 'Unknown';
-                    sectors[sector] = (sectors[sector] || 0) + 1;
+                    sectorSummary[sector] = (sectorSummary[sector] || 0) + 1;
                 });
                 
-                console.log('Sectors found:', sectors);
-                
-                let plottedCount = 0;
-                let missingCoords = 0;
-                
-                // Plot all facilities as simple dots
-                allFeatures.forEach(feature => {
-                    const props = feature.properties;
-                    let lat, lng;
-                    
-                    // Get coordinates from geometry or properties
-                    if (feature.geometry && feature.geometry.type === 'Point') {
-                        [lng, lat] = feature.geometry.coordinates;
-                    } else {
-                        lat = props.Latitude;
-                        lng = props.Longitude;
-                    }
-                    
-                    // Only create marker if we have valid coordinates
-                    if (lat && lng && !isNaN(lat) && !isNaN(lng)) {
-                        // Color code by sector
-                        const colors = {
-                            'Conventional Oil and Gas extraction': '#e74c3c',
-                            'Oil Sands Extraction': '#c0392b', 
-                            'Electric Power Generation, Transmission and Distribution': '#3498db',
-                            'Mining and Quarrying': '#9b59b6',
-                            'Waste Treatment and Disposal': '#2ecc71',
-                            'Chemicals Industry': '#f39c12',
-                            'Metallurgy': '#34495e',
-                            'Pulp and Paper': '#16a085'
-                        };
-                        
-                        const sector = props.SectorDescriptionEn || 'Other';
-                        const color = colors[sector] || '#95a5a6';
-                        
-                        L.circleMarker([lat, lng], {
-                            radius: 5,
-                            fillColor: color,
-                            color: '#2c3e50',
-                            weight: 1,
-                            opacity: 0.8,
-                            fillOpacity: 0.7
-                        })
-                        .bindPopup(createPopupContent(props))
-                        .addTo(map);
-                        
-                        plottedCount++;
-                    } else {
-                        missingCoords++;
-                    }
-                });
-                
-                console.log(`Plotted ${plottedCount} facilities, ${missingCoords} missing coordinates`);
+                console.log('Sector summary:', sectorSummary);
                 
                 loadingDiv.innerHTML = `
                     <h3>Data Loaded Successfully!</h3>
-                    <p>Total facilities: ${allFeatures.length}</p>
-                    <p>Plotted on map: ${plottedCount}</p>
-                    <p>Click any dot to see facility details</p>
-                    <button onclick="this.parentElement.style.display='none'">Close</button>
+                    <p><strong>Total facilities loaded: ${allFeatures.length}</strong></p>
+                    <p>Sectors found: ${Object.keys(sectorSummary).length}</p>
+                    <div style="max-height: 200px; overflow-y: auto; margin: 10px 0;">
+                        ${Object.entries(sectorSummary).map(([sector, count]) => 
+                            `<div style="padding: 2px 0;">• ${sector}: ${count}</div>`
+                        ).join('')}
+                    </div>
+                    <button onclick="this.parentElement.style.display='none'" style="width: 100%; padding: 8px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer;">Close</button>
                 `;
-                
             })
             .catch(error => {
-                console.error('Error loading data:', error);
+                console.error('Failed to load data:', error);
                 loadingDiv.innerHTML = `
                     <h3>Error Loading Data</h3>
                     <p>${error.message}</p>
-                    <p>Try refreshing the page or check the console for details.</p>
+                    <p>Some data may still have been loaded. Check the console for details.</p>
                 `;
             });
 
