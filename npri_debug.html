@@ -89,33 +89,50 @@
       const gj = await res.json();
       const feats = Array.isArray(gj.features) ? gj.features : [];
       console.log("[NPRI debug] Raw feature count:", feats.length);
-
-      // Plot as simple red circle markers
-      feats.forEach(f => {
-        const ll = getFeatureLatLon(f);
-        if (!ll) return;
-
-        const p = f.properties || {};
+      
+      // How many features actually *have* geometry?
+      const withGeom = feats.filter(f => f && f.geometry).length;
+      console.log("[NPRI debug] With geometry:", withGeom);
+      
+      let okCount = 0;
+      
+      feats.forEach((f, idx) => {
+        if (!f || !f.geometry) return;
+      
+        // Only use simple Point geometries for now
+        if (f.geometry.type !== "Point") return;
+      
+        const coords = f.geometry.coordinates;
+        if (!Array.isArray(coords) || coords.length < 2) return;
+      
+        const lon = Number(coords[0]);
+        const lat = Number(coords[1]);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+      
+        okCount++;
+      
+        const p   = f.properties || {};
         const fac = p.FACILITY_NAME || p.FacilityName || p.facility || "Facility";
         const co  = p.COMPANY_NAME  || p.Company      || p.company  || "";
         const yr  = p.REPORTING_YEAR || p.ReportingYear || p.year || "";
         const label = co ? `${fac} (${co})` : fac;
-
-        L.circleMarker([ll.lat, ll.lon], {
+      
+        L.circleMarker([lat, lon], {
           radius: 4,
           color: "#cc0000",
           weight: 1,
-          fillOpacity: 0.85
+          fillOpacity: 0.8
         })
           .bindPopup(`
             <b>${label}</b><br>
             ${yr ? "Year: " + yr + "<br>" : ""}
-            <small>${ll.lat.toFixed(4)}, ${ll.lon.toFixed(4)}</small>
+            <small>${lat.toFixed(4)}, ${lon.toFixed(4)}</small>
           `)
-          .addTo(npriLayer);
+          .addTo(npriLayerGroup);
       });
+      
+      console.log("[NPRI debug] Plotted NPRI features:", okCount);
 
-      console.log("[NPRI debug] Plotted NPRI features:", npriLayer.getLayers().length);
 
     } catch (err) {
       console.error("[NPRI debug] Error loading NPRI:", err);
