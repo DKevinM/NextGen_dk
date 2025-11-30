@@ -36,5 +36,25 @@
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="scripts/map.js"></script>
+    <!-- simplified version - add this to your existing HTML -->
+    <script>
+    // Add this to your current GitHub HTML file
+    const map = L.map('map').setView([56.130, -106.35], 4);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+    
+    // Fetch NPRI data directly
+    fetch('https://maps-cartes.ec.gc.ca/arcgis/rest/services/STB_DGST/NPRI/MapServer/0/query?where=1=1&outFields=*&returnGeometry=true&f=geojson&outSR=4326')
+        .then(response => response.json())
+        .then(data => {
+            data.features.forEach(feature => {
+                if (feature.geometry && feature.geometry.type === 'Point') {
+                    const [lng, lat] = feature.geometry.coordinates;
+                    L.marker([lat, lng])
+                        .bindPopup(`<b>${feature.properties.CompanyName}</b><br>${feature.properties.FacilityName}`)
+                        .addTo(map);
+                }
+            });
+        });
+    </script>
 </body>
 </html>
