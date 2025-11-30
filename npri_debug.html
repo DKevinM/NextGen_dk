@@ -31,86 +31,33 @@
         }
 
         #map {
-            height: 80vh;
+            height: 100vh;
             width: 100%;
         }
 
-        .sidebar {
-            position: fixed;
-            top: 120px;
-            right: 10px;
-            width: 300px;
-            background: white;
-            padding: 15px;
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-            max-height: calc(100vh - 140px);
-            overflow-y: auto;
-            z-index: 1000;
-        }
-
-        .info-panel {
-            border-top: 1px solid #eee;
-            padding-top: 15px;
-        }
-
-        #facilityInfo {
-            font-size: 0.9rem;
-            line-height: 1.4;
-        }
-
-        .facility-detail {
-            margin: 5px 0;
-        }
-
-        .facility-detail strong {
-            color: #2c3e50;
-        }
-
         .popup-content {
-            min-width: 200px;
+            min-width: 250px;
         }
 
-        .stats {
-            background: #f8f9fa;
-            padding: 10px;
-            margin: 10px 0;
-            border-radius: 5px;
-            border-left: 4px solid #3498db;
+        .popup-content h3 {
+            margin: 0 0 10px 0;
+            color: #2c3e50;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 5px;
         }
 
-        @media (max-width: 768px) {
-            .sidebar {
-                position: relative;
-                width: calc(100% - 40px);
-                margin: 10px;
-                top: 0;
-            }
-            
-            #map {
-                height: 60vh;
-            }
+        .popup-content p {
+            margin: 5px 0;
         }
     </style>
 </head>
 <body>
     <div class="header">
         <h1>NPRI Facilities - Alberta</h1>
-        <p>Environmental reporting facilities in Alberta from the National Pollutant Release Inventory</p>
+        <p>All environmental reporting facilities in Alberta</p>
     </div>
     
     <div id="map"></div>
-    
-    <div class="sidebar">
-        <div class="stats">
-            <h3>Alberta Facilities</h3>
-            <div id="facilityCount">Loading facilities...</div>
-        </div>
-        <div class="info-panel">
-            <h3>Facility Information</h3>
-            <div id="facilityInfo">Click on a facility to see details</div>
-        </div>
-    </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
@@ -122,63 +69,50 @@
             attribution: '© OpenStreetMap contributors'
         }).addTo(map);
 
-        let albertaFacilities = [];
-        let currentMarkers = [];
-
         // Load and display NPRI data - filter for Alberta only
         fetch('https://maps-cartes.ec.gc.ca/arcgis/rest/services/STB_DGST/NPRI/MapServer/0/query?where=1=1&outFields=*&returnGeometry=true&f=geojson&outSR=4326')
             .then(response => response.json())
             .then(data => {
                 // Filter for Alberta facilities only
-                albertaFacilities = data.features.filter(feature => 
+                const albertaFacilities = data.features.filter(feature => 
                     feature.properties.ProvinceCode === 'AB'
                 );
                 
                 console.log(`Loaded ${albertaFacilities.length} Alberta facilities`);
-                displayAlbertaFacilities();
-                updateFacilityCount();
+                
+                // Plot all facilities as simple dots
+                albertaFacilities.forEach(feature => {
+                    const props = feature.properties;
+                    let lat, lng;
+                    
+                    // Get coordinates from geometry or properties
+                    if (feature.geometry && feature.geometry.type === 'Point') {
+                        [lng, lat] = feature.geometry.coordinates;
+                    } else {
+                        // Fallback to properties if geometry is null
+                        lat = props.Latitude;
+                        lng = props.Longitude;
+                    }
+                    
+                    // Only create marker if we have valid coordinates
+                    if (lat && lng && !isNaN(lat) && !isNaN(lng)) {
+                        // Create a simple circle marker (dot)
+                        const dot = L.circleMarker([lat, lng], {
+                            radius: 6,
+                            fillColor: "#e74c3c",
+                            color: "#c0392b",
+                            weight: 1,
+                            opacity: 1,
+                            fillOpacity: 0.8
+                        })
+                        .bindPopup(createPopupContent(props))
+                        .addTo(map);
+                    }
+                });
+                
+                console.log('All Alberta facilities plotted as dots');
             })
             .catch(error => console.error('Error loading data:', error));
-
-        function displayAlbertaFacilities() {
-            clearMarkers();
-            
-            if (!albertaFacilities || albertaFacilities.length === 0) {
-                console.error('No Alberta facilities found');
-                return;
-            }
-            
-            let facilitiesPlotted = 0;
-            
-            albertaFacilities.forEach(feature => {
-                const props = feature.properties;
-                let lat, lng;
-                
-                // Get coordinates from geometry or properties
-                if (feature.geometry && feature.geometry.type === 'Point') {
-                    [lng, lat] = feature.geometry.coordinates;
-                } else {
-                    // Fallback to properties if geometry is null
-                    lat = props.Latitude;
-                    lng = props.Longitude;
-                }
-                
-                // Only create marker if we have valid coordinates
-                if (lat && lng && !isNaN(lat) && !isNaN(lng)) {
-                    const marker = L.marker([lat, lng])
-                        .bindPopup(createPopupContent(props))
-                        .on('click', function() {
-                            showFacilityInfo(props);
-                        });
-                    
-                    marker.addTo(map);
-                    currentMarkers.push(marker);
-                    facilitiesPlotted++;
-                }
-            });
-            
-            console.log(`Plotted ${facilitiesPlotted} Alberta facilities on map`);
-        }
 
         function createPopupContent(props) {
             return `
@@ -188,38 +122,9 @@
                     <p><strong>Sector:</strong> ${props.SectorDescriptionEn || 'N/A'}</p>
                     <p><strong>Location:</strong> ${props.City || 'N/A'}, ${props.ProvinceCode || 'N/A'}</p>
                     <p><strong>Report Year:</strong> ${props.ReportYear || 'N/A'}</p>
-                    <p><strong>Region:</strong> ${props.CensusDivisionEn || 'N/A'}</p>
+                    <p><strong>NAICS:</strong> ${props.NAICS__Code_SCIAN || 'N/A'}</p>
                 </div>
             `;
-        }
-
-        function showFacilityInfo(props) {
-            const infoDiv = document.getElementById('facilityInfo');
-            infoDiv.innerHTML = `
-                <div class="facility-detail"><strong>Company:</strong> ${props.CompanyName || 'N/A'}</div>
-                <div class="facility-detail"><strong>Facility:</strong> ${props.FacilityName || 'N/A'}</div>
-                <div class="facility-detail"><strong>Sector:</strong> ${props.SectorDescriptionEn || 'N/A'}</div>
-                <div class="facility-detail"><strong>Location:</strong> ${props.City || 'N/A'}, ${props.ProvinceCode || 'N/A'}</div>
-                <div class="facility-detail"><strong>Report Year:</strong> ${props.ReportYear || 'N/A'}</div>
-                <div class="facility-detail"><strong>NPRI ID:</strong> ${props.NpriID || 'N/A'}</div>
-                <div class="facility-detail"><strong>NAICS Code:</strong> ${props.NAICS__Code_SCIAN || 'N/A'}</div>
-                <div class="facility-detail"><strong>Region:</strong> ${props.CensusDivisionEn || 'N/A'}</div>
-                <div class="facility-detail"><strong>Ecozone:</strong> ${props.EcozoneEnglish || 'N/A'}</div>
-            `;
-        }
-
-        function updateFacilityCount() {
-            const countDiv = document.getElementById('facilityCount');
-            const plottedCount = currentMarkers.length;
-            countDiv.innerHTML = `
-                <div>Total Facilities: <strong>${albertaFacilities.length}</strong></div>
-                <div>Plotted on Map: <strong>${plottedCount}</strong></div>
-            `;
-        }
-
-        function clearMarkers() {
-            currentMarkers.forEach(marker => map.removeLayer(marker));
-            currentMarkers = [];
         }
     </script>
 </body>
