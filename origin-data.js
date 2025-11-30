@@ -179,7 +179,6 @@ window.fetchAllStationData = function () {
   return Promise.resolve(results);
 };
 
-
 // Global FeatureCollections
 window.STATIONS_FC = { type: "FeatureCollection", features: [] };
 window.PURPLE_FC   = { type: "FeatureCollection", features: [] };
@@ -227,35 +226,78 @@ window.purpleFCReady = (async () => {
   }
 })();
 
-
-
-// 3) NPRI
+// 3) NPRI - ENHANCED VERSION WITH MULTI-SECTOR FETCHING
 window.NPRI_FC = { type: "FeatureCollection", features: [] };
 
+// Enhanced NPRI fetching with multiple sector queries
 window.npriFCReady = (async () => {
   try {
-    const url =
-      "https://maps-cartes.ec.gc.ca/arcgis/rest/services/STB_DGST/NPRI/MapServer/0/query" +
-      "?where=1=1" +
-      "&outFields=FACILITY_NAME,COMPANY_NAME,REPORTING_YEAR" +
-      "&returnGeometry=true" +
-      "&outSR=4326" +
-      "&f=json";   // <-- Esri JSON, NOT geojson
+    console.log("[origin] Starting enhanced NPRI data fetch...");
+    
+    // List of sector queries to get ALL facilities
+    const sectorQueries = [
+      { name: 'Conventional Oil and Gas', where: "SectorDescriptionEn LIKE '%Oil and Gas%'" },
+      { name: 'Oil Sands', where: "SectorDescriptionEn LIKE '%Oil Sands%'" },
+      { name: 'Mining', where: "SectorDescriptionEn LIKE '%Mining%'" },
+      { name: 'Electric Power', where: "SectorDescriptionEn LIKE '%Electric Power%'" },
+      { name: 'Waste Treatment', where: "SectorDescriptionEn LIKE '%Waste%'" },
+      { name: 'Chemicals', where: "SectorDescriptionEn LIKE '%Chemical%'" },
+      { name: 'Metals', where: "SectorDescriptionEn LIKE '%Metal%'" },
+      { name: 'Pulp and Paper', where: "SectorDescriptionEn LIKE '%Pulp%' OR SectorDescriptionEn LIKE '%Paper%'" },
+      { name: 'Cement', where: "SectorDescriptionEn LIKE '%Cement%'" },
+      { name: 'Other Manufacturing', where: "SectorDescriptionEn LIKE '%Manufacturing%'" },
+      { name: 'Other Sectors', where: "1=1" } // Catch-all for any remaining sectors
+    ];
 
-    console.log("[origin] NPRI GET", url);
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    let allFeatures = [];
+    let totalSectors = sectorQueries.length;
+    let completedSectors = 0;
 
-    const js = await res.json();
+    for (const sectorQuery of sectorQueries) {
+      console.log(`[origin] Fetching NPRI sector: ${sectorQuery.name}`);
+      
+      try {
+        const features = await fetchNPRISectorData(sectorQuery);
+        allFeatures = allFeatures.concat(features);
+        completedSectors++;
+        
+        console.log(`[origin] ${sectorQuery.name}: ${features.length} facilities (${completedSectors}/${totalSectors} sectors completed)`);
+        
+        // Small delay to be respectful to the server
+        await new Promise(resolve => setTimeout(resolve, 300));
+        
+      } catch (sectorError) {
+        console.warn(`[origin] Failed to fetch ${sectorQuery.name}:`, sectorError);
+        completedSectors++;
+      }
+    }
 
-    const feats = (js.features || [])
+    console.log(`[origin] Total NPRI facilities loaded: ${allFeatures.length} from ${completedSectors} sectors`);
+
+    // Convert to proper GeoJSON features
+    const feats = allFeatures
       .map(f => {
         const g = f.geometry || {};
-        const attrs = f.attributes || {};
+        const attrs = f.properties || f.attributes || {};
 
-        // Esri point geometry is { x: lon, y: lat }
-        const x = Number(g.x);
-        const y = Number(g.y);
+        let x, y;
+        
+        // Handle different coordinate formats
+        if (g.type === 'Point' && Array.isArray(g.coordinates)) {
+          // Standard GeoJSON: [lon, lat]
+          [x, y] = g.coordinates;
+        } else if (g.x !== undefined && g.y !== undefined) {
+          // Esri format: {x: lon, y: lat}
+          x = g.x;
+          y = g.y;
+        } else {
+          // Fallback to properties
+          x = attrs.Longitude || attrs.longitude || attrs.LON;
+          y = attrs.Latitude || attrs.latitude || attrs.LAT;
+        }
+
+        x = Number(x);
+        y = Number(y);
         if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
 
         return {
@@ -265,9 +307,13 @@ window.npriFCReady = (async () => {
             coordinates: [x, y]
           },
           properties: {
-            FACILITY_NAME: attrs.FACILITY_NAME,
-            COMPANY_NAME:  attrs.COMPANY_NAME,
-            REPORTING_YEAR: attrs.REPORTING_YEAR
+            FACILITY_NAME: attrs.FACILITY_NAME || attrs.FacilityName,
+            COMPANY_NAME: attrs.COMPANY_NAME || attrs.CompanyName,
+            REPORTING_YEAR: attrs.REPORTING_YEAR || attrs.ReportYear,
+            SectorDescriptionEn: attrs.SectorDescriptionEn,
+            City: attrs.City,
+            ProvinceCode: attrs.ProvinceCode,
+            NAICS__Code_SCIAN: attrs.NAICS__Code_SCIAN
           }
         };
       })
@@ -278,50 +324,49 @@ window.npriFCReady = (async () => {
       features: feats
     };
 
-    console.log("[origin] NPRI_FC features:", feats.length);
+    console.log("[origin] NPRI_FC features after filtering:", feats.length);
+    
+    // Log sector distribution for debugging
+    const sectorCounts = {};
+    feats.forEach(f => {
+      const sector = f.properties.SectorDescriptionEn || 'Unknown';
+      sectorCounts[sector] = (sectorCounts[sector] || 0) + 1;
+    });
+    console.log("[origin] NPRI sectors distribution:", sectorCounts);
+
   } catch (e) {
     console.error("[origin] npriFCReady failed", e);
     window.NPRI_FC = { type: "FeatureCollection", features: [] };
   }
 })();
 
-
-
-// Once NPRI_FC is ready, plot all NPRI facilities on the map
-window.npriFCReady
-  ?.then(() => {
-    console.log("[origin] plotting NPRI facilities:", NPRI_FC.features.length);
-    npriLayerGroup.clearLayers();
-
-    (NPRI_FC.features || []).forEach(f => {
-      const ll = getFeatureLatLon(f);
-      if (!ll) return;
-
-      const p   = f.properties || {};
-      const fac = p.FACILITY_NAME || p.FacilityName || p.facility || "Facility";
-      const co  = p.COMPANY_NAME  || p.Company      || p.company  || "";
-      const yr  = p.REPORTING_YEAR || p.ReportingYear || p.year || "";
-      const label = co ? `${fac} (${co})` : fac;
-
-      const popupHtml = `
-        <b>${label}</b><br>
-        ${yr ? "Reporting year: " + yr + "<br>" : ""}
-        <small>Approx. location: ${ll.lat.toFixed(4)}, ${ll.lon.toFixed(4)}</small>
-      `;
-
-      L.circleMarker([ll.lat, ll.lon], {
-        radius: 4,
-        color: "#800026",
-        weight: 1,
-        fillOpacity: 0.7
-      })
-      .bindPopup(popupHtml)
-      .addTo(npriLayerGroup);
-    });
-  })
-  .catch(err => {
-    console.error("[origin] error plotting NPRI facilities", err);
-  });
-
-
-
+// Helper function to fetch data for a specific sector
+async function fetchNPRISectorData(sectorQuery, attempt = 1) {
+  const baseUrl = 'https://maps-cartes.ec.gc.ca/arcgis/rest/services/STB_DGST/NPRI/MapServer/0/query';
+  
+  // Focus on Alberta facilities in the specified sector
+  const whereClause = `ProvinceCode='AB' AND (${sectorQuery.where})`;
+  const url = `${baseUrl}?where=${encodeURIComponent(whereClause)}&outFields=*&returnGeometry=true&f=geojson&outSR=4326&resultRecordCount=2000`;
+  
+  try {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    
+    if (data.error) {
+      throw new Error(data.error.message || 'API error');
+    }
+    
+    return data.features || [];
+  } catch (error) {
+    console.warn(`[origin] Attempt ${attempt} failed for ${sectorQuery.name}:`, error);
+    
+    if (attempt < 2) {
+      // Wait and retry once
+      await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+      return fetchNPRISectorData(sectorQuery, attempt + 1);
+    }
+    
+    return [];
+  }
+}
