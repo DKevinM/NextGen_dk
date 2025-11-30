@@ -5,7 +5,112 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>NPRI Facilities Map - Canada</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <link rel="stylesheet" href="styles/style.css">
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+        }
+
+        .header {
+            background: #2c3e50;
+            color: white;
+            padding: 1rem;
+            text-align: center;
+        }
+
+        .header h1 {
+            margin: 0;
+            font-size: 1.5rem;
+        }
+
+        .header p {
+            margin: 0.5rem 0 0 0;
+            font-size: 0.9rem;
+            opacity: 0.8;
+        }
+
+        #map {
+            height: 70vh;
+            width: 100%;
+        }
+
+        .sidebar {
+            position: fixed;
+            top: 120px;
+            right: 10px;
+            width: 300px;
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            max-height: calc(100vh - 140px);
+            overflow-y: auto;
+            z-index: 1000;
+        }
+
+        .controls {
+            margin-bottom: 20px;
+        }
+
+        .controls select, .controls input {
+            width: 100%;
+            margin: 5px 0;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+
+        .controls button {
+            width: 100%;
+            padding: 8px;
+            margin: 5px 0;
+            background: #3498db;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .controls button:hover {
+            background: #2980b9;
+        }
+
+        .info-panel {
+            border-top: 1px solid #eee;
+            padding-top: 15px;
+        }
+
+        #facilityInfo {
+            font-size: 0.9rem;
+            line-height: 1.4;
+        }
+
+        .facility-detail {
+            margin: 5px 0;
+        }
+
+        .facility-detail strong {
+            color: #2c3e50;
+        }
+
+        .popup-content {
+            min-width: 200px;
+        }
+
+        @media (max-width: 768px) {
+            .sidebar {
+                position: relative;
+                width: calc(100% - 40px);
+                margin: 10px;
+                top: 0;
+            }
+            
+            #map {
+                height: 50vh;
+            }
+        }
+    </style>
 </head>
 <body>
     <div class="header">
@@ -35,26 +140,176 @@
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="scripts/map.js"></script>
-    <!-- simplified version - add this to your existing HTML -->
     <script>
-    // Add this to your current GitHub HTML file
-    const map = L.map('map').setView([56.130, -106.35], 4);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
-    
-    // Fetch NPRI data directly
-    fetch('https://maps-cartes.ec.gc.ca/arcgis/rest/services/STB_DGST/NPRI/MapServer/0/query?where=1=1&outFields=*&returnGeometry=true&f=geojson&outSR=4326')
-        .then(response => response.json())
-        .then(data => {
-            data.features.forEach(feature => {
+        // Initialize the map
+        const map = L.map('map').setView([56.130, -106.35], 4);
+
+        // Add base tile layer
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+        }).addTo(map);
+
+        let npriData;
+        let currentMarkers = [];
+
+        // Load and display NPRI data
+        fetch('https://maps-cartes.ec.gc.ca/arcgis/rest/services/STB_DGST/NPRI/MapServer/0/query?where=1=1&outFields=*&returnGeometry=true&f=geojson&outSR=4326')
+            .then(response => response.json())
+            .then(data => {
+                npriData = data;
+                console.log(`Loaded ${data.features.length} facilities`);
+                displayAllFacilities();
+                populateFilters();
+            })
+            .catch(error => console.error('Error loading data:', error));
+
+        function displayAllFacilities() {
+            clearMarkers();
+            
+            if (!npriData || !npriData.features) {
+                console.error('No data available');
+                return;
+            }
+            
+            let facilitiesPlotted = 0;
+            
+            npriData.features.forEach(feature => {
+                const props = feature.properties;
+                let lat, lng;
+                
+                // Get coordinates from geometry or properties
                 if (feature.geometry && feature.geometry.type === 'Point') {
-                    const [lng, lat] = feature.geometry.coordinates;
-                    L.marker([lat, lng])
-                        .bindPopup(`<b>${feature.properties.CompanyName}</b><br>${feature.properties.FacilityName}`)
-                        .addTo(map);
+                    [lng, lat] = feature.geometry.coordinates;
+                } else {
+                    // Fallback to properties if geometry is null
+                    lat = props.Latitude;
+                    lng = props.Longitude;
+                }
+                
+                // Only create marker if we have valid coordinates
+                if (lat && lng && !isNaN(lat) && !isNaN(lng)) {
+                    const marker = L.marker([lat, lng])
+                        .bindPopup(createPopupContent(props))
+                        .on('click', function() {
+                            showFacilityInfo(props);
+                        });
+                    
+                    marker.addTo(map);
+                    currentMarkers.push(marker);
+                    facilitiesPlotted++;
                 }
             });
-        });
+            
+            console.log(`Plotted ${facilitiesPlotted} facilities on map`);
+        }
+
+        function createPopupContent(props) {
+            return `
+                <div class="popup-content">
+                    <h3>${props.CompanyName || 'Unknown Company'}</h3>
+                    <p><strong>Facility:</strong> ${props.FacilityName || 'N/A'}</p>
+                    <p><strong>Sector:</strong> ${props.SectorDescriptionEn || 'N/A'}</p>
+                    <p><strong>Location:</strong> ${props.City || 'N/A'}, ${props.ProvinceCode || 'N/A'}</p>
+                    <p><strong>Report Year:</strong> ${props.ReportYear || 'N/A'}</p>
+                </div>
+            `;
+        }
+
+        function showFacilityInfo(props) {
+            const infoDiv = document.getElementById('facilityInfo');
+            infoDiv.innerHTML = `
+                <div class="facility-detail"><strong>Company:</strong> ${props.CompanyName || 'N/A'}</div>
+                <div class="facility-detail"><strong>Facility:</strong> ${props.FacilityName || 'N/A'}</div>
+                <div class="facility-detail"><strong>Sector:</strong> ${props.SectorDescriptionEn || 'N/A'}</div>
+                <div class="facility-detail"><strong>Location:</strong> ${props.City || 'N/A'}, ${props.ProvinceCode || 'N/A'}</div>
+                <div class="facility-detail"><strong>Report Year:</strong> ${props.ReportYear || 'N/A'}</div>
+                <div class="facility-detail"><strong>NPRI ID:</strong> ${props.NpriID || 'N/A'}</div>
+                <div class="facility-detail"><strong>NAICS Code:</strong> ${props.NAICS__Code_SCIAN || 'N/A'}</div>
+            `;
+        }
+
+        function populateFilters() {
+            const provinces = new Set();
+            const sectors = new Set();
+            
+            npriData.features.forEach(feature => {
+                if (feature.properties.ProvinceCode) provinces.add(feature.properties.ProvinceCode);
+                if (feature.properties.SectorDescriptionEn) sectors.add(feature.properties.SectorDescriptionEn);
+            });
+            
+            const provinceSelect = document.getElementById('provinceFilter');
+            const sectorSelect = document.getElementById('sectorFilter');
+            
+            // Sort provinces alphabetically
+            Array.from(provinces).sort().forEach(province => {
+                const option = document.createElement('option');
+                option.value = province;
+                option.textContent = province;
+                provinceSelect.appendChild(option);
+            });
+            
+            // Sort sectors alphabetically
+            Array.from(sectors).sort().forEach(sector => {
+                const option = document.createElement('option');
+                option.value = sector;
+                option.textContent = sector;
+                sectorSelect.appendChild(option);
+            });
+        }
+
+        function applyFilters() {
+            const provinceFilter = document.getElementById('provinceFilter').value;
+            const sectorFilter = document.getElementById('sectorFilter').value;
+            const yearFilter = document.getElementById('yearFilter').value;
+            
+            clearMarkers();
+            
+            let facilitiesPlotted = 0;
+            
+            npriData.features.forEach(feature => {
+                const props = feature.properties;
+                
+                // Apply filters
+                if (provinceFilter && props.ProvinceCode !== provinceFilter) return;
+                if (sectorFilter && props.SectorDescriptionEn !== sectorFilter) return;
+                if (yearFilter && props.ReportYear !== parseInt(yearFilter)) return;
+                
+                let lat, lng;
+                if (feature.geometry && feature.geometry.type === 'Point') {
+                    [lng, lat] = feature.geometry.coordinates;
+                } else {
+                    lat = props.Latitude;
+                    lng = props.Longitude;
+                }
+                
+                if (lat && lng && !isNaN(lat) && !isNaN(lng)) {
+                    const marker = L.marker([lat, lng])
+                        .bindPopup(createPopupContent(props))
+                        .on('click', function() {
+                            showFacilityInfo(props);
+                        });
+                    
+                    marker.addTo(map);
+                    currentMarkers.push(marker);
+                    facilitiesPlotted++;
+                }
+            });
+            
+            console.log(`Filtered: ${facilitiesPlotted} facilities`);
+        }
+
+        function resetFilters() {
+            document.getElementById('provinceFilter').value = '';
+            document.getElementById('sectorFilter').value = '';
+            document.getElementById('yearFilter').value = '';
+            displayAllFacilities();
+            document.getElementById('facilityInfo').innerHTML = 'Click on a facility to see details';
+        }
+
+        function clearMarkers() {
+            currentMarkers.forEach(marker => map.removeLayer(marker));
+            currentMarkers = [];
+        }
     </script>
 </body>
 </html>
