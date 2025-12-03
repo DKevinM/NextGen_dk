@@ -210,7 +210,7 @@ window.stationsFCReady = (async () => {
 // 2) PurpleAir
 window.purpleFCReady = (async () => {
   try {
-    const res  = await fetch("https://raw.githubusercontent.com/DKevinM/AB_datapull/main/data/ACA_PM25_map.json");
+    const res  = await fetch("https://raw.githubusercontent.com/DKevinM/AB_datapull/main/data/AB_PM25_map.json");
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
     const json = await res.json();
