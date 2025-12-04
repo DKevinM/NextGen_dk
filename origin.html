@@ -66,7 +66,7 @@
 
   // Base tiles (single OSM layer, keep a handle for layer control)
   const osmLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 10,
+    maxZoom: 16,
     attribution: '&copy; OpenStreetMap contributors'
   }).addTo(map);
 
@@ -542,12 +542,36 @@
     try {
       await updateWindFromOpenMeteo(lat, lng);
 
+      
+      drawWindArrow(lat, lng, lastWind.u, lastWind.v);
+
+    
       const trajectories = await computeEnsembleTrajectories(lat, lng, {
         nParticles: 8,
         hoursBack: 2,
         dtMinutes: 10
       });
 
+      
+
+      // draw a simple wind arrow at the receptor using lastWind
+      function drawWindArrow(lat, lon, u, v) {
+        const len = 0.3; // degrees scaled; tweak
+        const mag = Math.sqrt(u*u + v*v) || 1;
+        const scale = len / mag;
+      
+        const endLat = lat + v * scale * 0.01;
+        const endLon = lon + u * scale * 0.01;
+      
+        L.polyline([[lat, lon], [endLat, endLon]], {
+          weight: 3,
+          opacity: 0.9,
+          color: "#333"
+        }).addTo(trajLayerGroup);
+      }
+
+
+      
       const footprint = buildFootprint(trajectories);
       const dom = computeDominantDirection(trajectories);
 
@@ -563,8 +587,10 @@
       let stationUpwind = stationHits.filter(h => {
         const ll = getFeatureLatLon(h.feature);
         if (!ll) return false;
-        const brg = bearingFromStationToReceptor(ll.lat, ll.lon, lat, lng);
+        
+        const brg = bearingDeg(lat, lng, ll.lat, ll.lon);
         const stSector = bearingToSector(brg);
+              
         return !dom.sector || stSector === dom.sector;
       });
 
@@ -629,7 +655,7 @@
       let purpleLines = "Aucun";
       if (purpleHits.length) {
         purpleLines = purpleHits
-          .slice(0, 3)
+          .slice(0, 5)
           .map(h => {
             const p   = h.feature.properties || {};
             const nm  = p.name || p.Label || p.label || "PurpleAir";
@@ -649,7 +675,7 @@
       let npriLines = "Aucun";
       if (npriHitsFinal.length) {
         npriLines = npriHitsFinal
-          .slice(0, 3)
+          .slice(0, 10)
           .map(h => {
             const p   = h.feature.properties || {};
             const fac = p.FACILITY_NAME || p.FacilityName || p.facility || "Installation NPRI";
@@ -671,11 +697,11 @@
             : "N/A"
         }<br/>
         Ensemble members: ${dom.samples}<br/><br/>
-        <b>Upwind AQ stations (~20 km):</b><br/>
+        <b>Upwind AQ stations (~20 km, possible source region):</b><br/>
         ${stationLines}<br/><br/>
-        <b>Upwind PurpleAir sensors (~20 km):</b><br/>
+        <b>Upwind PurpleAir sensors (~20 km, top 5):</b><br/>
         ${purpleLines}<br/><br/>
-        <b>Upwind NPRI facilities (~15 km):</b><br/>
+        <b>Upwind NPRI facilities (~15 km, top 10):</b><br/>
         ${npriLines}
       `;
 
