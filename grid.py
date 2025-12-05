@@ -14,8 +14,10 @@ TARGET_CRS = "EPSG:4326"
 ACA_SHP   = "NextGen_dk/data/ACA_Boundary_2022.shp"
 WCAS_SHP  = "NextGen_dk/data/WCAS_2024.shp"
 
-STATIONS_CSV = "NextGen_dk/data/stations.csv"     # or .shp / .geojson
-PURPLE_CSV   = "NextGen_dk/data/purpleair.csv"    # ditto
+# Remote data sources (GitHub raw)
+STATIONS_URL = "https://raw.githubusercontent.com/DKevinM/AB_datapull/main/data/last6h.csv"
+PURPLE_URL   = "https://raw.githubusercontent.com/DKevinM/AB_datapull/main/data/AB_PM25_map.json"
+
 
 # Grid resolutions (metres)
 ACA_CELL_M   = 1000   # 2 km
