@@ -1,3 +1,5 @@
+import json
+import urllib.request
 import numpy as np
 import pandas as pd
 import geopandas as gpd
@@ -112,22 +114,62 @@ def load_stations_from_url() -> gpd.GeoDataFrame:
 
 
 def load_purple_from_url() -> gpd.GeoDataFrame:
-    gdf = gpd.read_file(PURPLE_URL)
+    """
+    Load PurpleAir sensors from AB_PM25_map.json (non-OGR JSON),
+    build a GeoDataFrame, and compute estimated AQHI.
+    """
+    # --- 1) Fetch the JSON ---
+    with urllib.request.urlopen(PURPLE_URL) as f:
+        raw = f.read().decode("utf-8")
+    data = json.loads(raw)
 
-    # Ensure CRS
-    if gdf.crs is None:
-        gdf.set_crs(epsg=4326, inplace=True)
+    # data could be:
+    #  - a list of dicts
+    #  - a dict with "data" key
+    #  - a GeoJSON-like dict with "features"
+    if isinstance(data, dict) and "features" in data:
+        # It's GeoJSON-ish
+        gdf = gpd.GeoDataFrame.from_features(data["features"], crs="EPSG:4326")
+    else:
+        # Try to get to a plain list of records
+        if isinstance(data, dict) and "data" in data:
+            records = data["data"]
+        else:
+            records = data
+
+        if not isinstance(records, list):
+            raise ValueError("Unexpected JSON structure in AB_PM25_map.json")
+
+        df = pd.DataFrame(records)
+
+        # --- 2) Identify lat/lon columns ---
+        lat_candidates = ["lat", "Lat", "latitude", "Latitude", "LAT"]
+        lon_candidates = ["lon", "Lon", "lng", "Lng", "longitude", "Longitude", "LON"]
+
+        lat_col = next((c for c in lat_candidates if c in df.columns), None)
+        lon_col = next((c for c in lon_candidates if c in df.columns), None)
+
+        if lat_col is None or lon_col is None:
+            raise ValueError("Could not find lat/lon columns in AB_PM25_map.json")
+
+        # --- 3) Build GeoDataFrame from lat/lon ---
+        gdf = gpd.GeoDataFrame(
+            df,
+            geometry=[Point(xy) for xy in zip(df[lon_col], df[lat_col])],
+            crs="EPSG:4326"
+        )
+
+    # --- 4) Reproject to target CRS ---
     gdf = gdf.to_crs(TARGET_CRS)
 
-    # pick PM2.5 column
-    pm_candidates = ["pm_corr", "PM2_5", "pm25", "pm_25", "pm2_5"]
+    # --- 5) Find PM2.5 column and compute estimated AQHI ---
+    pm_candidates = ["pm_corr", "PM2_5", "pm25", "pm_25", "pm2_5", "pm"]
     pm_col = next((c for c in pm_candidates if c in gdf.columns), None)
     if pm_col is None:
         raise ValueError("No PM2.5 column found in AB_PM25_map.json")
 
     gdf["pm_val"] = pd.to_numeric(gdf[pm_col], errors="coerce")
 
-    # estimated AQHI = round(PM2.5/10) + 1, capped at 10
     def est_aqhi(pm):
         if pd.isna(pm):
             return np.nan
