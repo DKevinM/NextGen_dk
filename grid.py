@@ -15,7 +15,7 @@ ACA_SHP   = "NextGen_dk/data/ACA_Boundary_2022.shp"
 WCAS_SHP  = "NextGen_dk/data/WCAS_2024.shp"
 
 # Remote data sources (GitHub raw)
-STATIONS_URL = "https://raw.githubusercontent.com/DKevinM/AB_datapull/main/data/last6h.csv"
+STATIONS_CSV = "https://raw.githubusercontent.com/DKevinM/AB_datapull/main/data/last6h.csv"
 PURPLE_URL   = "https://raw.githubusercontent.com/DKevinM/AB_datapull/main/data/AB_PM25_map.json"
 
 
