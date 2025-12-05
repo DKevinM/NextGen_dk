@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>AQHI IDW Grids – ACA & WCAS (stations vs blended)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- Leaflet CSS -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+    crossorigin=""
+  />
+
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+    }
+    #map {
+      width: 100%;
+      height: 100%;
+    }
+    .legend {
+      background: white;
+      padding: 6px 8px;
+      font: 12px/14px system-ui, Arial, sans-serif;
+      box-shadow: 0 0 10px rgba(0,0,0,0.2);
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+<div id="map"></div>
+
+<!-- Leaflet JS -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+  // ----------------------------------------------------------
+  // 1) URLs to your 4 GeoJSONs (change branch name if needed)
+  // ----------------------------------------------------------
+  const acaBlendUrl   = "https://raw.githubusercontent.com/DKevinM/NextGen_dk/main/data/ACA_AQHI_station_vs_blended.geojson";
+  const acaStationUrl = "https://raw.githubusercontent.com/DKevinM/NextGen_dk/main/data/ACA_AQHI_station_only.geojson";
+  const wcasBlendUrl  = "https://raw.githubusercontent.com/DKevinM/NextGen_dk/main/data/WCAS_AQHI_station_vs_blended.geojson";
+  const wcasStationUrl= "https://raw.githubusercontent.com/DKevinM/NextGen_dk/main/data/WCAS_AQHI_station_only.geojson";
+
+  // ----------------------------------------------------------
+  // 2) Map + base layer
+  // ----------------------------------------------------------
+  const map = L.map("map").setView([53.5, -113.5], 7);
+
+  const osm = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 13,
+    attribution: "&copy; OpenStreetMap contributors"
+  }).addTo(map);
+
+  // ----------------------------------------------------------
+  // 3) AQHI color ramp (approximate AQHI categories)
+  // ----------------------------------------------------------
+  function aqhiColor(v) {
+    if (v == null || isNaN(v)) return "#D3D3D3"; // missing
+    if (v > 10) v = 10;
+
+    // 1–3: low, 4–6: moderate, 7–10: high/very high
+    if (v <= 3)  return "#01cbff"; // blue
+    if (v <= 6)  return "#ffcb00"; // yellow
+    if (v <= 8)  return "#ff9835"; // orange
+    return "#640100";              // dark red
+  }
+
+  // ----------------------------------------------------------
+  // 4) Helper to build circleMarker layers for a given field
+  // ----------------------------------------------------------
+  function makePointLayer(propName, label) {
+    return L.geoJSON(null, {
+      pointToLayer: function (feature, latlng) {
+        const v = feature.properties ? feature.properties[propName] : null;
+        return L.circleMarker(latlng, {
+          radius: 4,
+          color: "#333",
+          weight: 0.2,
+          fillColor: aqhiColor(typeof v === "number" ? v : parseFloat(v)),
+          fillOpacity: 0.8
+        });
+      },
+      onEachFeature: function (feature, layer) {
+        const props = feature.properties || {};
+        let v = props[propName];
+        if (typeof v === "string") {
+          const num = parseFloat(v);
+          if (!isNaN(num)) v = num;
+        }
+        const valStr =
+          typeof v === "number" && isFinite(v) ? v.toFixed(1) :
+          (v != null ? v : "N/A");
+
+        const catProp = propName + "_cat";
+        const cat = props[catProp];
+
+        layer.bindPopup(
+          `<b>${label}</b><br>` +
+          `AQHI: ${valStr}` +
+          (cat ? ` (cat: ${cat})` : "")
+        );
+      }
+    });
+  }
+
+  // ----------------------------------------------------------
+  // 5) Create the 4 layers
+  // ----------------------------------------------------------
+  const acaBlendLayer    = makePointLayer("aqhi_blend", "ACA – blended (stations + PurpleAir)");
+  const acaStationLayer  = makePointLayer("aqhi_stn",   "ACA – stations only");
+  const wcasBlendLayer   = makePointLayer("aqhi_blend", "WCAS – blended (stations + PurpleAir)");
+  const wcasStationLayer = makePointLayer("aqhi_stn",   "WCAS – stations only");
+
+  // ----------------------------------------------------------
+  // 6) Fetch & add data
+  // ----------------------------------------------------------
+  Promise.all([
+    fetch(acaBlendUrl).then(r => r.json()).then(j => acaBlendLayer.addData(j)),
+    fetch(acaStationUrl).then(r => r.json()).then(j => acaStationLayer.addData(j)),
+    fetch(wcasBlendUrl).then(r => r.json()).then(j => wcasBlendLayer.addData(j)),
+    fetch(wcasStationUrl).then(r => r.json()).then(j => wcasStationLayer.addData(j))
+  ]).then(() => {
+    // Show ACA blended + WCAS blended by default
+    acaBlendLayer.addTo(map);
+    wcasBlendLayer.addTo(map);
+
+    // Fit map to ACA blended bounds if possible
+    try {
+      const b = acaBlendLayer.getBounds();
+      if (b.isValid()) {
+        map.fitBounds(b.pad(0.1));
+      }
+    } catch (e) {
+      console.warn("Could not fit bounds:", e);
+    }
+  }).catch(err => {
+    console.error("Error loading GeoJSON:", err);
+  });
+
+  // ----------------------------------------------------------
+  // 7) Layer control
+  // ----------------------------------------------------------
+  const overlays = {
+    "ACA – blended (stations + PurpleAir)": acaBlendLayer,
+    "ACA – stations only": acaStationLayer,
+    "WCAS – blended (stations + PurpleAir)": wcasBlendLayer,
+    "WCAS – stations only": wcasStationLayer
+  };
+
+  L.control.layers({ "OpenStreetMap": osm }, overlays, {
+    collapsed: false
+  }).addTo(map);
+
+</script>
+</body>
+</html>
