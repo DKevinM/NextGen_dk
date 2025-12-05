@@ -55,19 +55,12 @@ def est_aqhi_from_pm(pm_val: float) -> float | None:
 
 
 def load_airshed(shp_path):
-    """
-    Load an airshed shapefile and reproject to TARGET_CRS.
-    shp_path can be a string or a pathlib.Path.
-    """
-    # Ensure we have a string path for geopandas
-    if isinstance(shp_path, Path):
-        shp_path = str(shp_path)
-
-    gdf = gpd.read_file(shp_path)
-
+    from pathlib import Path
+    p = Path(shp_path)
+    print(f"[grid] Loading airshed shapefile from: {p.resolve()}")
+    gdf = gpd.read_file(p)
     if gdf.crs is None:
-        raise ValueError(f"{shp_path} has no CRS; please set one in the shapefile")
-
+        raise ValueError(f"{p} has no CRS; please set one in the shapefile.")
     return gdf.to_crs(TARGET_CRS)
 
 
