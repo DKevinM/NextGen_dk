@@ -13,9 +13,10 @@ from pathlib import Path
 # CRS that uses metres (important for distances); adjust to your usual one
 TARGET_CRS = "EPSG:4326"  
 
-# File paths (adjust to your repo)
-ACA_SHP   = "NextGen_dk/data/ACA_Boundary_2022.shp"
-WCAS_SHP  = "NextGen_dk/data/WCAS_2024.shp"
+# File paths
+BASE_DIR = Path(__file__).resolve().parent
+ACA_SHP  = BASE_DIR / "data" / "ACA_Boundary_2022.shp"
+WCAS_SHP = BASE_DIR / "data" / "WCAS_Boundary_2024.shp"
 
 # Remote data sources (GitHub raw)
 STATIONS_URL = "https://raw.githubusercontent.com/DKevinM/AB_datapull/main/data/last6h.csv"
