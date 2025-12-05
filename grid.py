@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import geopandas as gpd
 from shapely.geometry import Point
+from pathlib import Path
 
 # --------------------------------------------------
 # CONFIG
@@ -48,6 +49,26 @@ def est_aqhi_from_pm(pm_val: float) -> float | None:
     if aq < 0:
         return None
     return min(aq, 10.0)
+
+
+
+
+def load_airshed(shp_path):
+    """
+    Load an airshed shapefile and reproject to TARGET_CRS.
+    shp_path can be a string or a pathlib.Path.
+    """
+    # Ensure we have a string path for geopandas
+    if isinstance(shp_path, Path):
+        shp_path = str(shp_path)
+
+    gdf = gpd.read_file(shp_path)
+
+    if gdf.crs is None:
+        raise ValueError(f"{shp_path} has no CRS; please set one in the shapefile")
+
+    return gdf.to_crs(TARGET_CRS)
+
 
 
 # --------------------------------------------------
