@@ -11,7 +11,7 @@ from pathlib import Path
 # --------------------------------------------------
 
 # CRS that uses metres (important for distances); adjust to your usual one
-TARGET_CRS = "EPSG:4326"  
+TARGET_CRS = "EPSG:3400"  
 
 # File paths
 BASE_DIR = Path(__file__).resolve().parent
@@ -351,7 +351,23 @@ def build_airshed_grids(shp_path: str,
         grid[cat_col] = cat
 
     if outfile_geojson is not None:
+        from pathlib import Path
+        outfile_geojson = Path(outfile_geojson)
+
+        # 7a) Save the full grid (with both fields) as your existing filename
         grid.to_file(outfile_geojson, driver="GeoJSON")
+
+        # 7b) Also create a stations-only GeoJSON beside it
+        stn_only_path = outfile_geojson.with_name(
+            outfile_geojson.stem.replace("_station_vs_blended", "_station_only") + ".geojson"
+        )
+
+        # If you want a stripped-down version, keep just geometry + station fields
+        stn_only_cols = ["geometry", "x", "y", "aqhi_stn", "aqhi_stn_cat"]
+        grid_stn_only = grid[stn_only_cols].copy()
+
+        grid_stn_only.to_file(stn_only_path, driver="GeoJSON")
+
 
     return grid
 
