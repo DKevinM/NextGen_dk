@@ -15,7 +15,7 @@ ACA_SHP   = "NextGen_dk/data/ACA_Boundary_2022.shp"
 WCAS_SHP  = "NextGen_dk/data/WCAS_2024.shp"
 
 # Remote data sources (GitHub raw)
-STATIONS_CSV = "https://raw.githubusercontent.com/DKevinM/AB_datapull/main/data/last6h.csv"
+STATIONS_URL = "https://raw.githubusercontent.com/DKevinM/AB_datapull/main/data/last6h.csv"
 PURPLE_URL   = "https://raw.githubusercontent.com/DKevinM/AB_datapull/main/data/AB_PM25_map.json"
 
 
@@ -52,69 +52,89 @@ def est_aqhi_from_pm(pm_val: float) -> float | None:
 # Data loading
 # --------------------------------------------------
 
-def load_airshed(shp_path: str) -> gpd.GeoDataFrame:
-    gdf = gpd.read_file(shp_path)
-    if gdf.crs is None:
-        raise ValueError(f"{shp_path} has no CRS; please set one before using.")
-    return gdf.to_crs(TARGET_CRS)
+def load_stations_from_url() -> gpd.GeoDataFrame:
+    df = pd.read_csv(STATIONS_URL)
 
+    # ---- figure out basic columns ----
+    # Station name
+    if "StationName" in df.columns:
+        stn_col = "StationName"
+    else:
+        raise ValueError("No StationName column in last6h.csv")
 
-def load_stations(csv_path: str) -> gpd.GeoDataFrame:
-    """
-    Expect columns: lon, lat, AQHI (adjust names as needed).
-    If you already have a shapefile, switch to gpd.read_file().
-    """
-    df = pd.read_csv(csv_path)
-    # adjust these to your actual column names
-    lon_col = "lon"
-    lat_col = "lat"
-    aqhi_col = "AQHI"
+    # Latitude / longitude (adjust if your names differ)
+    lat_candidates = ["Latitude", "lat", "Lat"]
+    lon_candidates = ["Longitude", "lon", "Lon", "lng"]
 
+    lat_col = next((c for c in lat_candidates if c in df.columns), None)
+    lon_col = next((c for c in lon_candidates if c in df.columns), None)
+    if lat_col is None or lon_col is None:
+        raise ValueError("Could not find latitude/longitude columns in last6h.csv")
+
+    # AQHI value – either direct AQHI column or via ParameterName/Value
+    aqhi_col = None
+    if "AQHI" in df.columns:
+        aqhi_col = "AQHI"
+    elif "aqhi" in df.columns:
+        aqhi_col = "aqhi"
+    else:
+        # fallback: parameter-style layout
+        if {"ParameterName", "Value"}.issubset(df.columns):
+            mask = df["ParameterName"] == "AQHI"
+            df = df[mask].copy()
+            aqhi_col = "Value"
+        else:
+            raise ValueError("No AQHI or parameter-style AQHI in last6h.csv")
+
+    # Datetime column to pick latest per station
+    dt_candidates = ["ReadingDate", "DateTime", "date_time", "Timestamp"]
+    dt_col = next((c for c in dt_candidates if c in df.columns), None)
+    if dt_col is None:
+        raise ValueError("No datetime column (ReadingDate/DateTime) in last6h.csv")
+
+    df[dt_col] = pd.to_datetime(df[dt_col], errors="coerce")
+
+    # sort + keep last record per station
+    df = df.sort_values(dt_col).drop_duplicates(stn_col, keep="last")
+
+    # build GeoDataFrame
     gdf = gpd.GeoDataFrame(
         df,
         geometry=gpd.points_from_xy(df[lon_col], df[lat_col]),
         crs="EPSG:4326"
     ).to_crs(TARGET_CRS)
 
-    # numeric AQHI, capped at 10
-    gdf["aqhi_val"] = pd.to_numeric(gdf[aqhi_col], errors="coerce")
-    gdf["aqhi_val"] = gdf["aqhi_val"].clip(upper=10)
+    # numeric AQHI capped at 10
+    gdf["aqhi_val"] = pd.to_numeric(gdf[aqhi_col], errors="coerce").clip(upper=10)
+    gdf["weight"] = 1.0   # station weight
 
-    gdf["weight"] = STATION_WEIGHT
     return gdf
 
 
-def load_purple(csv_path: str) -> gpd.GeoDataFrame:
-    """
-    Expect columns: lon, lat, and some pm25 field(s) (pm_corr, pm25, PM2_5, etc.).
-    Adjust the field names to match your actual schema.
-    """
-    df = pd.read_csv(csv_path)
+def load_purple_from_url() -> gpd.GeoDataFrame:
+    gdf = gpd.read_file(PURPLE_URL)
 
-    lon_col_candidates = ["lon", "longitude", "LON"]
-    lat_col_candidates = ["lat", "latitude", "LAT"]
+    # Ensure CRS
+    if gdf.crs is None:
+        gdf.set_crs(epsg=4326, inplace=True)
+    gdf = gdf.to_crs(TARGET_CRS)
 
-    lon_col = next((c for c in lon_col_candidates if c in df.columns), None)
-    lat_col = next((c for c in lat_col_candidates if c in df.columns), None)
-
-    if lon_col is None or lat_col is None:
-        raise ValueError("Could not find lon/lat columns for PurpleAir data.")
-
-    gdf = gpd.GeoDataFrame(
-        df,
-        geometry=gpd.points_from_xy(df[lon_col], df[lat_col]),
-        crs="EPSG:4326"
-    ).to_crs(TARGET_CRS)
-
-    # PM2.5 candidates; adjust to your actual columns
-    pm_candidates = ["pm_corr", "pm25", "PM2_5", "PM2.5", "pm_25"]
+    # pick PM2.5 column
+    pm_candidates = ["pm_corr", "PM2_5", "pm25", "pm_25", "pm2_5"]
     pm_col = next((c for c in pm_candidates if c in gdf.columns), None)
-
     if pm_col is None:
-        raise ValueError("No PM2.5 column found for PurpleAir data.")
+        raise ValueError("No PM2.5 column found in AB_PM25_map.json")
 
     gdf["pm_val"] = pd.to_numeric(gdf[pm_col], errors="coerce")
-    gdf["aqhi_val"] = gdf["pm_val"].apply(est_aqhi_from_pm)
+
+    # estimated AQHI = round(PM2.5/10) + 1, capped at 10
+    def est_aqhi(pm):
+        if pd.isna(pm):
+            return np.nan
+        aq = round(pm / 10.0) + 1
+        return min(max(aq, 0), 10)
+
+    gdf["aqhi_val"] = gdf["pm_val"].apply(est_aqhi)
     gdf["weight"]   = PURPLE_WEIGHT
 
     return gdf
@@ -281,8 +301,9 @@ def build_airshed_grids(shp_path: str,
 
 if __name__ == "__main__":
     # Load point data once
-    stations_gdf = load_stations(STATIONS_CSV)
-    purple_gdf   = load_purple(PURPLE_CSV)
+    stations_gdf = load_stations_from_url()
+    purple_gdf   = load_purple_from_url()
+
 
     # ACA grid
     aca_grid = build_airshed_grids(
