@@ -308,9 +308,13 @@ def build_airshed_grids(shp_path: str,
     stn = stn[stn["aqhi_val"].notna()].copy()
     stn["weight"] = STATION_WEIGHT  # should already be this, but just to be explicit
 
+    print(f"[grid] {shp_path} – stations total: {len(stations_gdf)}, non-null AQHI: {len(stn)}")
+
     # 3) Prepare blended points (stations + PurpleAir)
     pa  = purple_gdf.copy()
     pa  = pa[pa["aqhi_val"].notna()].copy()
+
+    print(f"[grid] {shp_path} – PurpleAir total: {len(purple_gdf)}, non-null AQHI: {len(pa)}")
 
     pts_blend = pd.concat([stn, pa], ignore_index=True)
     pts_blend = gpd.GeoDataFrame(pts_blend, geometry="geometry", crs=TARGET_CRS)
@@ -354,23 +358,23 @@ def build_airshed_grids(shp_path: str,
         from pathlib import Path
         outfile_geojson = Path(outfile_geojson)
 
-        # 7a) Save the full grid (with both fields) as your existing filename
-        grid.to_file(outfile_geojson, driver="GeoJSON")
+        # Reproject grid to WGS84 for Leaflet
+        grid_out = grid.to_crs("EPSG:4326")
 
-        # 7b) Also create a stations-only GeoJSON beside it
+        # Save full (stations+blended) grid
+        grid_out.to_file(outfile_geojson, driver="GeoJSON")
+
+        # Also save a stations-only file
         stn_only_path = outfile_geojson.with_name(
             outfile_geojson.stem.replace("_station_vs_blended", "_station_only") + ".geojson"
         )
 
-        # If you want a stripped-down version, keep just geometry + station fields
-        stn_only_cols = ["geometry", "x", "y", "aqhi_stn", "aqhi_stn_cat"]
-        grid_stn_only = grid[stn_only_cols].copy()
-
-        grid_stn_only.to_file(stn_only_path, driver="GeoJSON")
-
+        stn_only_cols = ["geometry", "aqhi_stn", "aqhi_stn_cat"]
+        grid_stn_only_out = grid_out[stn_only_cols].copy()
+        grid_stn_only_out.to_file(stn_only_path, driver="GeoJSON")
 
     return grid
-
+                            
 
 if __name__ == "__main__":
     # Load point data once
