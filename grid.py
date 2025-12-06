@@ -73,88 +73,68 @@ def load_stations_from_url() -> gpd.GeoDataFrame:
     """
     Load station locations + *true* AQHI from last6h.csv.
 
-    Logic:
-      - Use StationName, Latitude/Longitude from the CSV.
-      - Use AQHI directly:
-          * if there is a wide 'AQHI'/'aqhi' column, use it, OR
-          * if long format, keep only rows where ParameterName is an AQHI variant
-            and take 'Value' as AQHI.
-      - Take the *latest* AQHI per station based on datetime column.
-      - Clip AQHI at 10 for safety, keep NaNs if not numeric.
+    File structure (per Kevin's example):
+      Value, StationName, ParameterName, ReadingDate, Latitude, Longitude
+
+    Convention:
+      - The *AQHI* rows are exactly those where ParameterName is NULL or "".
+      - All other rows (non-empty ParameterName) are other parameters.
+
+    We:
+      - keep only rows with blank ParameterName,
+      - take Value as AQHI,
+      - keep the *latest* AQHI per station,
+      - build a GeoDataFrame in TARGET_CRS with aqhi_val and weight.
     """
     df = pd.read_csv(STATIONS_URL)
 
-    # ---- 1) Station name ----
-    if "StationName" not in df.columns:
-        raise ValueError("No StationName column in last6h.csv")
+    # ---- 1) Basic columns ----
+    required_cols = ["Value", "StationName", "ParameterName", "ReadingDate", "Latitude", "Longitude"]
+    missing = [c for c in required_cols if c not in df.columns]
+    if missing:
+        raise ValueError(f"last6h.csv is missing required columns: {missing}")
+
     stn_col = "StationName"
+    lat_col = "Latitude"
+    lon_col = "Longitude"
 
-    # ---- 2) Latitude / longitude ----
-    lat_candidates = ["Latitude", "lat", "Lat"]
-    lon_candidates = ["Longitude", "lon", "Lon", "lng"]
+    # ---- 2) Select AQHI rows: ParameterName is NULL or empty ----
+    param = df["ParameterName"].astype(str)
+    mask_aqhi = df["ParameterName"].isna() | (param.str.strip() == "")
+    aqhi_df = df[mask_aqhi].copy()
 
-    lat_col = next((c for c in lat_candidates if c in df.columns), None)
-    lon_col = next((c for c in lon_candidates if c in df.columns), None)
-    if lat_col is None or lon_col is None:
-        raise ValueError("Could not find latitude/longitude columns in last6h.csv")
-
-    # ---- 3) Find AQHI values ----
-    # Case A: wide table with AQHI column on each row
-    if "AQHI" in df.columns:
-        aqhi_df = df.copy()
-        aqhi_col = "AQHI"
-    elif "aqhi" in df.columns:
-        aqhi_df = df.copy()
-        aqhi_col = "aqhi"
-    # Case B: long table with ParameterName/Value
-    elif {"ParameterName", "Value"}.issubset(df.columns):
-        # include a few likely variants of the AQHI name;
-        # tweak these strings if needed once you inspect the CSV.
-        aqhi_names = [
-            "AQHI",
-            "Air Quality Health Index",
-            "Air Quality Health Index (AQHI)"
-        ]
-        mask = df["ParameterName"].isin(aqhi_names)
-        aqhi_df = df[mask].copy()
-        aqhi_col = "Value"
-        if aqhi_df.empty:
-            raise ValueError(
-                "Found ParameterName/Value columns but no rows where "
-                "ParameterName looks like AQHI; check the exact label."
-            )
-    else:
+    if aqhi_df.empty:
+        # Debug: help us see what's in ParameterName
+        print("[grid] ParameterName unique values (non-null):")
+        print(df["ParameterName"].dropna().unique()[:50])
         raise ValueError(
-            "Could not find AQHI in last6h.csv "
-            "(no AQHI column and no ParameterName/Value layout)."
+            "No AQHI rows found: expected ParameterName to be NULL/empty "
+            "for AQHI in last6h.csv."
         )
 
-    # ---- 4) Datetime column to pick *latest* AQHI per station ----
-    dt_candidates = ["ReadingDate", "DateTime", "date_time", "Timestamp"]
-    dt_col = next((c for c in dt_candidates if c in aqhi_df.columns), None)
-    if dt_col is None:
-        raise ValueError("No datetime column (ReadingDate/DateTime) in last6h.csv")
-
+    # ---- 3) Datetime -> pick latest AQHI per station ----
+    dt_col = "ReadingDate"
     aqhi_df[dt_col] = pd.to_datetime(aqhi_df[dt_col], errors="coerce")
 
-    # Keep only rows with valid coords and AQHI candidate
-    aqhi_df = aqhi_df.dropna(subset=[lat_col, lon_col, aqhi_col])
+    # Ensure we have valid coords and timestamps
+    aqhi_df = aqhi_df.dropna(subset=[lat_col, lon_col, dt_col, "Value"])
 
-    # ---- 5) For each station, keep the last AQHI record ----
+    # Sort by time and keep last per station
     aqhi_df = aqhi_df.sort_values(dt_col).drop_duplicates(stn_col, keep="last")
 
-    # ---- 6) Build GeoDataFrame in WGS84, then to TARGET_CRS ----
+    # ---- 4) Build GeoDataFrame in WGS84 -> TARGET_CRS ----
     gdf = gpd.GeoDataFrame(
         aqhi_df,
         geometry=gpd.points_from_xy(aqhi_df[lon_col], aqhi_df[lat_col]),
-        crs="EPSG:4326"   # lat/lon in the CSV
+        crs="EPSG:4326"   # latitude/longitude
     ).to_crs(TARGET_CRS)
 
-    # ---- 7) Numeric AQHI for IDW, capped at 10 ----
-    gdf["aqhi_val"] = pd.to_numeric(gdf[aqhi_col], errors="coerce").clip(upper=10)
+    # ---- 5) Numeric AQHI, capped at 10 ----
+    gdf["aqhi_val"] = pd.to_numeric(gdf["Value"], errors="coerce").clip(upper=10)
     gdf["weight"]   = STATION_WEIGHT  # 1.0
 
     return gdf
+
 
 
 
