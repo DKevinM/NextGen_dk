@@ -22,6 +22,21 @@
       width: 100%;
       height: 100%;
     }
+    .aqhi-grid-icon {
+      /* wrapper class for Leaflet, main styling is on .aqhi-cell */
+    }
+    .aqhi-cell {
+      width: 30px;
+      height: 30px;
+      line-height: 30px;
+      text-align: center;
+      font-size: 12px;
+      font-weight: 600;
+      color: #000; /* change to #fff if you want white text */
+      border-radius: 4px;
+      border: 1px solid rgba(0,0,0,0.4);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+    }
     .legend {
       background: white;
       padding: 6px 8px;
@@ -38,12 +53,12 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
   // ----------------------------------------------------------
-  // 1) URLs to your 4 GeoJSONs (change branch name if needed)
+  // 1) URLs to your 4 GeoJSONs (adjust branch if needed)
   // ----------------------------------------------------------
-  const acaBlendUrl   = "https://raw.githubusercontent.com/DKevinM/NextGen_dk/main/data/ACA_AQHI_station_vs_blended.geojson";
-  const acaStationUrl = "https://raw.githubusercontent.com/DKevinM/NextGen_dk/main/data/ACA_AQHI_station_only.geojson";
-  const wcasBlendUrl  = "https://raw.githubusercontent.com/DKevinM/NextGen_dk/main/data/WCAS_AQHI_station_vs_blended.geojson";
-  const wcasStationUrl= "https://raw.githubusercontent.com/DKevinM/NextGen_dk/main/data/WCAS_AQHI_station_only.geojson";
+  const acaBlendUrl    = "https://raw.githubusercontent.com/DKevinM/NextGen_dk/main/data/ACA_AQHI_station_vs_blended.geojson";
+  const acaStationUrl  = "https://raw.githubusercontent.com/DKevinM/NextGen_dk/main/data/ACA_AQHI_station_only.geojson";
+  const wcasBlendUrl   = "https://raw.githubusercontent.com/DKevinM/NextGen_dk/main/data/WCAS_AQHI_station_vs_blended.geojson";
+  const wcasStationUrl = "https://raw.githubusercontent.com/DKevinM/NextGen_dk/main/data/WCAS_AQHI_station_only.geojson";
 
   // ----------------------------------------------------------
   // 2) Map + base layer
@@ -56,90 +71,138 @@
   }).addTo(map);
 
   // ----------------------------------------------------------
-  // 3) AQHI color ramp (approximate AQHI categories)
+  // 3) AQHI colour ramp (official-like AQHI categories)
   // ----------------------------------------------------------
   function aqhiColor(v) {
-    if (v == null || isNaN(v)) return "#D3D3D3"; // missing
-    if (v > 10) v = 10;
+    if (v == null || isNaN(v)) return "#D3D3D3";
 
-    // 1–3: low, 4–6: moderate, 7–10: high/very high
-    if (v <= 3)  return "#01cbff"; // blue
-    if (v <= 6)  return "#ffcb00"; // yellow
-    if (v <= 8)  return "#ff9835"; // orange
-    return "#640100";              // dark red
+    if (v >= 10) return "#660000";   // very high
+    if (v >= 9)  return "#990000";
+    if (v >= 8)  return "#CC0000";
+    if (v >= 7)  return "#FF3300";
+    if (v >= 6)  return "#FF6600";
+    if (v >= 5)  return "#FF9900";
+    if (v >= 4)  return "#FFCC00";
+    if (v >= 3)  return "#CCCC00";
+    if (v >= 2)  return "#66CC00";
+    if (v >= 1)  return "#00CC33";
+
+    return "#D3D3D3";
   }
 
   // ----------------------------------------------------------
-  // 4) Helper to build circleMarker layers for a given field
+  // 4) LayerGroups for the four views
   // ----------------------------------------------------------
-  function makePointLayer(propName, label) {
-    return L.geoJSON(null, {
-      pointToLayer: function (feature, latlng) {
-        const v = feature.properties ? feature.properties[propName] : null;
-        return L.circleMarker(latlng, {
-          radius: 4,
-          color: "#333",
-          weight: 0.2,
-          fillColor: aqhiColor(typeof v === "number" ? v : parseFloat(v)),
-          fillOpacity: 0.8
-        });
-      },
-      onEachFeature: function (feature, layer) {
-        const props = feature.properties || {};
-        let v = props[propName];
-        if (typeof v === "string") {
-          const num = parseFloat(v);
-          if (!isNaN(num)) v = num;
+  const acaBlendLayer    = L.layerGroup();
+  const acaStationLayer  = L.layerGroup();
+  const wcasBlendLayer   = L.layerGroup();
+  const wcasStationLayer = L.layerGroup();
+
+  // ----------------------------------------------------------
+  // 5) Helper to build a DivIcon layer from a URL
+  //    valProp: name of numeric AQHI field (e.g., "aqhi_blend")
+  //    catProp: name of category field (e.g., "aqhi_blend_cat")
+  // ----------------------------------------------------------
+  function buildGridLayer(url, valProp, catProp, targetLayer) {
+    return fetch(url)
+      .then(resp => {
+        if (!resp.ok) {
+          throw new Error("HTTP " + resp.status + " for " + url);
         }
-        const valStr =
-          typeof v === "number" && isFinite(v) ? v.toFixed(1) :
-          (v != null ? v : "N/A");
+        return resp.json();
+      })
+      .then(data => {
+        const layer = L.geoJSON(data, {
+          pointToLayer: (feature, latlng) => {
+            const props = feature.properties || {};
 
-        const catProp = propName + "_cat";
-        const cat = props[catProp];
+            let val = props[valProp];
+            if (typeof val === "string") {
+              const num = parseFloat(val);
+              if (!isNaN(num)) val = num;
+            }
 
-        layer.bindPopup(
-          `<b>${label}</b><br>` +
-          `AQHI: ${valStr}` +
-          (cat ? ` (cat: ${cat})` : "")
-        );
-      }
-    });
+            if (val == null || isNaN(val)) return null; // skip empty cells
+
+            const cat  = props[catProp] || "";  // e.g., "1".."10+"
+            const color = aqhiColor(val);
+
+            const icon = L.divIcon({
+              className: "aqhi-grid-icon",
+              html: `<div class="aqhi-cell" style="background:${color};">${cat}</div>`,
+              iconSize: [30, 30],
+              iconAnchor: [15, 15]  // center on grid point
+            });
+
+            return L.marker(latlng, { icon });
+          }
+        });
+
+        layer.addTo(targetLayer);
+        return layer;
+      });
   }
 
   // ----------------------------------------------------------
-  // 5) Create the 4 layers
+  // 6) Load all four layers
+  //    (adjust valProp/catProp names if your station_only files differ)
   // ----------------------------------------------------------
-  const acaBlendLayer    = makePointLayer("aqhi_blend", "ACA – blended (stations + PurpleAir)");
-  const acaStationLayer  = makePointLayer("aqhi_stn",   "ACA – stations only");
-  const wcasBlendLayer   = makePointLayer("aqhi_blend", "WCAS – blended (stations + PurpleAir)");
-  const wcasStationLayer = makePointLayer("aqhi_stn",   "WCAS – stations only");
+  const loadPromises = [
+    // ACA blended (stations + PurpleAir)
+    buildGridLayer(
+      acaBlendUrl,
+      "aqhi_blend",
+      "aqhi_blend_cat",
+      acaBlendLayer
+    ),
 
-  // ----------------------------------------------------------
-  // 6) Fetch & add data
-  // ----------------------------------------------------------
-  Promise.all([
-    fetch(acaBlendUrl).then(r => r.json()).then(j => acaBlendLayer.addData(j)),
-    fetch(acaStationUrl).then(r => r.json()).then(j => acaStationLayer.addData(j)),
-    fetch(wcasBlendUrl).then(r => r.json()).then(j => wcasBlendLayer.addData(j)),
-    fetch(wcasStationUrl).then(r => r.json()).then(j => wcasStationLayer.addData(j))
-  ]).then(() => {
-    // Show ACA blended + WCAS blended by default
-    acaBlendLayer.addTo(map);
-    wcasBlendLayer.addTo(map);
+    // ACA stations-only
+    buildGridLayer(
+      acaStationUrl,
+      "aqhi_stn",
+      "aqhi_stn_cat",
+      acaStationLayer
+    ),
 
-    // Fit map to ACA blended bounds if possible
-    try {
-      const b = acaBlendLayer.getBounds();
-      if (b.isValid()) {
-        map.fitBounds(b.pad(0.1));
+    // WCAS blended
+    buildGridLayer(
+      wcasBlendUrl,
+      "aqhi_blend",
+      "aqhi_blend_cat",
+      wcasBlendLayer
+    ),
+
+    // WCAS stations-only
+    buildGridLayer(
+      wcasStationUrl,
+      "aqhi_stn",
+      "aqhi_stn_cat",
+      wcasStationLayer
+    )
+  ];
+
+  Promise.all(loadPromises)
+    .then(layers => {
+      // Show both blended layers by default
+      acaBlendLayer.addTo(map);
+      wcasBlendLayer.addTo(map);
+
+      // Fit map to ACA blended bounds if possible
+      try {
+        const groupBounds = L.featureGroup([
+          acaBlendLayer,
+          wcasBlendLayer
+        ]).getBounds();
+        if (groupBounds.isValid()) {
+          map.fitBounds(groupBounds.pad(0.1));
+        }
+      } catch (e) {
+        console.warn("Could not fit bounds:", e);
       }
-    } catch (e) {
-      console.warn("Could not fit bounds:", e);
-    }
-  }).catch(err => {
-    console.error("Error loading GeoJSON:", err);
-  });
+    })
+    .catch(err => {
+      console.error("Error loading grid layers:", err);
+    });
 
   // ----------------------------------------------------------
   // 7) Layer control
@@ -155,6 +218,37 @@
     collapsed: false
   }).addTo(map);
 
+  // ----------------------------------------------------------
+  // 8) Optional legend (AQHI categories)
+  // ----------------------------------------------------------
+  const legend = L.control({ position: "bottomright" });
+
+  legend.onAdd = function(map) {
+    const div = L.DomUtil.create("div", "legend");
+    const grades = [
+      { label: "1 (Low)",   v: 1 },
+      { label: "2",         v: 2 },
+      { label: "3",         v: 3 },
+      { label: "4 (Mod)",   v: 4 },
+      { label: "5",         v: 5 },
+      { label: "6",         v: 6 },
+      { label: "7 (High)",  v: 7 },
+      { label: "8",         v: 8 },
+      { label: "9",         v: 9 },
+      { label: "10+",       v: 10 }
+    ];
+
+    div.innerHTML = "<b>AQHI</b><br/>";
+    grades.forEach(g => {
+      const color = aqhiColor(g.v);
+      div.innerHTML +=
+        `<span style="display:inline-block;width:16px;height:16px;background:${color};margin-right:4px;border:1px solid #555;"></span>${g.label}<br/>`;
+    });
+
+    return div;
+  };
+
+  legend.addTo(map);
 </script>
 </body>
 </html>
