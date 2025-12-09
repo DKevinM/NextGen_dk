@@ -520,6 +520,39 @@
       });
     }
 
+
+
+    // Which point features are within radiusKm of ANY footprint cell?
+  function pointsInFootprint(srcFC, cells, radiusKm = 20) {
+    if (!srcFC || !Array.isArray(srcFC.features) || !Array.isArray(cells) || !cells.length) {
+      return [];
+    }
+
+    const hits = [];
+
+    for (const src of srcFC.features) {
+      const ll = getFeatureLatLon(src);
+      if (!ll) continue;
+
+      const pt = turf.point([ll.lon, ll.lat]);
+
+      let best = Infinity;
+      for (const cell of cells) {
+        const cellPt = turf.point([cell.lon, cell.lat]);
+        const d = turf.distance(pt, cellPt, { units: "kilometers" });
+        if (d < best) best = d;
+      }
+
+      if (best <= radiusKm) {
+        hits.push({ feature: src, dist_km: best });
+      }
+    }
+
+    // sort closest first
+    hits.sort((a, b) => a.dist_km - b.dist_km);
+    return hits;
+  }
+
   
 // ─────────────────────────────────────────
 // Click handler – 3h centreline + ensemble bubbles
