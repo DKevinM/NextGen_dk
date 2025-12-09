@@ -490,7 +490,35 @@
         samples: fromBearings.length
       };
     }
-
+  
+    // Draw all ensemble members as polylines
+    function drawTrajectories(trajectories) {
+      if (!Array.isArray(trajectories)) return;
+  
+      trajectories.forEach(traj => {
+        if (!traj || !traj.length) return;
+        const latlngs = traj.map(pt => [pt.lat, pt.lon]);
+        L.polyline(latlngs, {
+          weight: 2,
+          opacity: 0.9,
+          color: "#555"
+        }).addTo(trajLayerGroup);
+      });
+    }
+  
+    // Draw “influence bubbles” from footprint cells
+    function drawFootprint(cells) {
+      if (!Array.isArray(cells)) return;
+  
+      cells.forEach(cell => {
+        const radius = 300 + cell.count * 80; // tweak as needed
+        L.circle([cell.lat, cell.lon], {
+          radius,
+          weight: 0,
+          fillOpacity: 0.25
+        }).addTo(trajLayerGroup);
+      });
+    }
 
   
 // ─────────────────────────────────────────
