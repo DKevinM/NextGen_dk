@@ -341,6 +341,43 @@
     console.error("[origin init] error plotting layers", err);
   });
 
+
+  // ─────────────────────────────────────────
+  // Simple ensemble using your back-trajectory stepper
+  // ─────────────────────────────────────────
+  function computeEnsembleTrajectories(startLat, startLon, options = {}) {
+    const nParticles = options.nParticles ?? 8;
+    const hoursBack  = options.hoursBack  ?? 3;   // default 3 h
+    const trajectories = [];
+
+    for (let p = 0; p < nParticles; p++) {
+      // small jitter so members don’t sit on top of each other
+      const lat0 = startLat + (Math.random() - 0.5) * 0.03;
+      const lon0 = startLon + (Math.random() - 0.5) * 0.03;
+
+      const winds = [];
+      for (let h = 0; h < hoursBack; h++) {
+        // base wind from lastWind (Open-Meteo) with a bit of spread
+        const baseWs = Number.isFinite(lastWind.ws)   ? lastWind.ws   : 5.0;
+        const baseWd = Number.isFinite(lastWind.wdDeg) ? lastWind.wdDeg : 270;
+
+        const ws = baseWs * (0.7 + 0.6 * Math.random());        // 70–130% of base speed
+        const wd = baseWd + (Math.random() - 0.5) * 30;         // ±15° direction jitter
+
+        winds.push({ ws, wd, hours: 1 });
+      }
+
+      // Use your existing window.computeBackTrajectory from origin-data.js
+      const pts = window.computeBackTrajectory(lat0, lon0, winds);
+
+      // Convert [lat, lon] -> {lat, lon} to match buildFootprint/drawTrajectories
+      const traj = pts.map(([lat, lon]) => ({ lat, lon }));
+      trajectories.push(traj);
+    }
+
+    return trajectories;
+  }
+  
 // ─────────────────────────────────────────
 // Click handler – 3h centreline + ensemble bubbles
 // ─────────────────────────────────────────
