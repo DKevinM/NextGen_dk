@@ -645,7 +645,7 @@
               const v = +aq;
               aq = v > 10 ? "10+" : v.toFixed(0);
             }
-            const dkm = h.dist_km.toFixed(2);  // 2 decimal places
+            const dkm = h.dist_km.toFixed(1);  // 2 decimal places
             return `${nm} — AQHI: ${aq} (≈${dkm} km)`;
           })
           .join("<br>");
@@ -663,9 +663,9 @@
             let pmStr = pmRaw;
             const pmVal = parseFloat(pmRaw);
             if (Number.isFinite(pmVal)) {
-              pmStr = pmVal.toFixed(2);
+              pmStr = pmVal.toFixed(1);
             }
-            const dkm = h.dist_km.toFixed(2);
+            const dkm = h.dist_km.toFixed(1);
             return `${nm} — PM2.5: ${pmStr} µg/m³ (≈${dkm} km)`;
           })
           .join("<br>");
@@ -682,8 +682,9 @@
             const co  = p.COMPANY_NAME  || p.Company      || p.company  || "";
             const yr  = p.REPORTING_YEAR || p.ReportingYear || p.year || "";
             const dkm = h.dist_km.toFixed(2);
-            const label = co ? `${fac} (${co})` : fac;
-            return `${label} — ${yr ? "Year " + yr + ", " : ""}≈${dkm} km`;
+            // const label = co ? `${fac} (${co})` : fac
+            const label = fac;
+            return `${label} }≈${dkm} km`;
           })
           .join("<br>");
       }
