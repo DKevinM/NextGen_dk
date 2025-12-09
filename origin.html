@@ -608,7 +608,7 @@ map.on("click", async (e) => {
     // 3) Ensemble trajectories + footprint ("bubbles")
     const trajectories = await computeEnsembleTrajectories(lat, lng, {
       nParticles: 8,
-      hoursBack: 4,   // change to 4 if you want 4-hour footprint
+      hoursBack: 3,   // change to 4 if you want 4-hour footprint
       dtMinutes: 10
     });
 
