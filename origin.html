@@ -515,148 +515,104 @@
   });
 
 
-    // ─────────────────────────────────────────
-  // Click handler – simple 3h back-trajectory
-  // ─────────────────────────────────────────
-  map.on("click", async (e) => {
-    const { lat, lng } = e.latlng;
+  
+// ─────────────────────────────────────────
+// Click handler – simple 3h back-trajectory
+// ─────────────────────────────────────────
+map.on("click", async (e) => {
+  const { lat, lng } = e.latlng;
 
-    // Ensure station / Purple / NPRI FeatureCollections are loaded
-    await Promise.all([
-      window.stationsFCReady,
-      window.purpleFCReady,
-      window.npriFCReady
-    ]);
+  await Promise.all([
+    window.stationsFCReady,
+    window.purpleFCReady,
+    window.npriFCReady
+  ]);
 
-    trajLayerGroup.clearLayers();
+  trajLayerGroup.clearLayers();
 
-    // Mark the receptor
-    L.circleMarker(e.latlng, {
-      radius: 6,
-      color: "#000",
-      weight: 2,
-      fillColor: "#ff0000",
-      fillOpacity: 0.9
+  L.circleMarker(e.latlng, {
+    radius: 6,
+    color: "#000",
+    weight: 2,
+    fillColor: "#ff0000",
+    fillOpacity: 0.9
+  }).addTo(trajLayerGroup);
+
+  try {
+    await updateWindFromOpenMeteo(lat, lng);
+
+    const ws = Number.isFinite(lastWind.ws) ? lastWind.ws : 5.0;
+    const wd = Number.isFinite(lastWind.wdDeg) ? lastWind.wdDeg : 270;
+
+    const winds3h = [
+      { ws, wd, hours: 1 },
+      { ws, wd, hours: 1 },
+      { ws, wd, hours: 1 }
+    ];
+
+    const trajPoints = window.computeBackTrajectory(lat, lng, winds3h);
+    const trajFeature = window.trajectoryToGeoJSON(trajPoints);
+
+    L.geoJSON(trajFeature, {
+      style: { weight: 2, opacity: 0.9, color: "#333" }
     }).addTo(trajLayerGroup);
 
-    try {
-      // Get current wind at the click location
-      await updateWindFromOpenMeteo(lat, lng);
+    const stationsNear = window.findFeaturesNearTrajectory(trajPoints, window.STATIONS_FC, 20);
+    const purpleNear   = window.findFeaturesNearTrajectory(trajPoints, window.PURPLE_FC, 20);
+    const npriNear     = window.findFeaturesNearTrajectory(trajPoints, window.NPRI_FC, 15);
 
-      // Build a simple 3-hour history using the same ws/wd for each hour (for now)
-      const ws = (lastWind.ws && Number.isFinite(lastWind.ws))
-        ? lastWind.ws
-        : 5.0;          // fallback
-      const wd = (lastWind.wdDeg && Number.isFinite(lastWind.wdDeg))
-        ? lastWind.wdDeg
-        : 270;          // fallback
+    const makeList = (arr, formatter) =>
+      arr.length ? arr.slice(0, 5).map(formatter).join("<br>") : "None";
 
-      const winds3h = [
-        { ws, wd, hours: 1 }, // 0–1 h back
-        { ws, wd, hours: 1 }, // 1–2 h back
-        { ws, wd, hours: 1 }  // 2–3 h back
-      ];
-
-      // 1) Compute back-trajectory points (using helpers from origin-data.js)
-      const trajPoints = window.computeBackTrajectory(lat, lng, winds3h);
-      const trajFeature = window.trajectoryToGeoJSON(trajPoints, {
-        start_lat: lat,
-        start_lon: lng
-      });
-
-      // Draw the trajectory line
-      L.geoJSON(trajFeature, {
-        style: { weight: 2, opacity: 0.9, color: "#333" }
-      }).addTo(trajLayerGroup);
-
-      // 2) Find features near the path
-      const stationsNear = window.findFeaturesNearTrajectory(
-        trajPoints,
-        window.STATIONS_FC,
-        20   // km radius around path
-      );
-      const purpleNear = window.findFeaturesNearTrajectory(
-        trajPoints,
-        window.PURPLE_FC,
-        20
-      );
-      const npriNear = window.findFeaturesNearTrajectory(
-        trajPoints,
-        window.NPRI_FC,
-        15
-      );
-
-      // 3) Build summary text
-
-      let stationLines = "None";
-      if (stationsNear.length) {
-        stationLines = stationsNear
-          .slice(0, 5)
-          .map(h => {
-            const p  = h.feature.properties || {};
-            const nm = p.stationName || p.StationName || "Station";
-            let aq   = p.aqhi ?? p.AQHI ?? "N/A";
-            if (!isNaN(+aq)) {
-              const v = +aq;
-              aq = v > 10 ? "10+" : v.toFixed(0);
-            }
-            const dkm = h.minDistKm.toFixed(1);
-            return `${nm} — AQHI: ${aq} (≈${dkm} km from path)`;
-          })
-          .join("<br>");
+    const stationLines = makeList(
+      stationsNear,
+      h => {
+        const p = h.feature.properties || {};
+        const nm = p.stationName || p.StationName || "Station";
+        let aq = p.aqhi ?? p.AQHI ?? "N/A";
+        if (!isNaN(+aq)) aq = (+aq > 10 ? "10+" : (+aq).toFixed(0));
+        return `${nm} — AQHI: ${aq} (≈${h.minDistKm.toFixed(1)} km)`;
       }
+    );
 
-      let purpleLines = "None";
-      if (purpleNear.length) {
-        purpleLines = purpleNear
-          .slice(0, 5)
-          .map(h => {
-            const p  = h.feature.properties || {};
-            const nm = p.name || p.Label || p.label || "PurpleAir";
-            const pmRaw = p.pm_corr ?? p.pm25 ?? p.PM2_5 ?? p["pm2.5"] ?? "N/A";
-            let pmStr = pmRaw;
-            const pmVal = parseFloat(pmRaw);
-            if (Number.isFinite(pmVal)) pmStr = pmVal.toFixed(1);
-            const dkm = h.minDistKm.toFixed(1);
-            return `${nm} — PM2.5: ${pmStr} µg/m³ (≈${dkm} km from path)`;
-          })
-          .join("<br>");
+    const purpleLines = makeList(
+      purpleNear,
+      h => {
+        const p = h.feature.properties || {};
+        const nm = p.name || p.Label || "PurpleAir";
+        const pm = parseFloat(p.pm_corr ?? p.pm25 ?? p.PM2_5 ?? "N/A");
+        const pmStr = Number.isFinite(pm) ? pm.toFixed(1) : "N/A";
+        return `${nm} — PM2.5: ${pmStr} µg/m³ (≈${h.minDistKm.toFixed(1)} km)`;
       }
+    );
 
-      let npriLines = "None";
-      if (npriNear.length) {
-        npriLines = npriNear
-          .slice(0, 10)
-          .map(h => {
-            const p   = h.feature.properties || {};
-            const fac = p.FACILITY_NAME || p.FacilityName || p.facility || "NPRI facility";
-            const dkm = h.minDistKm.toFixed(1);
-            return `${fac} (≈${dkm} km from path)`;
-          })
-          .join("<br>");
+    const npriLines = makeList(
+      npriNear,
+      h => {
+        const p = h.feature.properties || {};
+        const fac = p.FACILITY_NAME || "Facility";
+        return `${fac} (≈${h.minDistKm.toFixed(1)} km)`;
       }
+    );
 
-      const popupHtml = `
-        <b>Simple 3-hour back trajectory</b><br/>
-        Wind-from: ${wd.toFixed(0)}&deg;, speed: ${ws.toFixed(1)} m/s<br/><br/>
-        <b>Stations near path (~20 km):</b><br/>
-        ${stationLines}<br/><br/>
-        <b>PurpleAir near path (~20 km):</b><br/>
-        ${purpleLines}<br/><br/>
-        <b>NPRI facilities near path (~15 km):</b><br/>
-        ${npriLines}
-      `;
+    const popupHtml = `
+      <b>Simple 3-hour back trajectory</b><br/>
+      Wind-from: ${wd.toFixed(0)}° at ${ws.toFixed(1)} m/s<br/><br/>
+      <b>AQHI stations near path (~20 km):</b><br/>${stationLines}<br/><br/>
+      <b>PurpleAir near path (~20 km):</b><br/>${purpleLines}<br/><br/>
+      <b>NPRI facilities (~15 km):</b><br/>${npriLines}
+    `;
 
-      L.popup()
-        .setLatLng(e.latlng)
-        .setContent(popupHtml)
-        .openOn(map);
+    L.popup()
+      .setLatLng(e.latlng)
+      .setContent(popupHtml)
+      .openOn(map);
 
-    } catch (err) {
-      console.error("Back-trajectory error:", err);
-      alert("Could not compute back trajectory. Check console for details.");
-    }
-  });
+  } catch (err) {
+    console.error("Back-trajectory error:", err);
+  }
+});
+
 
       
 
