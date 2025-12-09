@@ -417,6 +417,33 @@
       });
     }
 
+
+    // Bearing from (lat1, lon1) TO (lat2, lon2), in degrees 0–360
+    function bearingDeg(lat1, lon1, lat2, lon2) {
+      const phi1 = lat1 * Math.PI / 180.0;
+      const phi2 = lat2 * Math.PI / 180.0;
+      const dLon = (lon2 - lon1) * Math.PI / 180.0;
+  
+      const x = Math.sin(dLon) * Math.cos(phi2);
+      const y =
+        Math.cos(phi1) * Math.sin(phi2) -
+        Math.sin(phi1) * Math.cos(phi2) * Math.cos(dLon);
+  
+      const brng = Math.atan2(x, y) * 180.0 / Math.PI;
+      return (brng + 360.0) % 360.0; // normalize to 0–360
+    }
+  
+    // Map a bearing to a 45° sector label
+    function bearingToSector(bearing) {
+      const labels = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+      const sectorSize = 360.0 / labels.length;  // 45°
+      const idx = Math.floor((bearing + sectorSize / 2.0) / sectorSize) % labels.length;
+      return labels[idx];
+    }
+
+
+
+  
     // Summarize dominant upwind sector from ensemble trajectories
     function computeDominantDirection(trajectories) {
       const fromBearings = [];
