@@ -1,6 +1,3 @@
-// origin-data.js
-// Minimal station + PurpleAir + NPRI loaders for the origin map
-
 // ----------------- Helpers -----------------
 function arrayToFeatureCollection(arr){
   if (!arr || !arr.length) return { type:'FeatureCollection', features: [] };
@@ -30,6 +27,168 @@ function toPointFC(json) {
 
   return arrayToFeatureCollection(arr || []);
 }
+
+
+
+// ----------------- Back-trajectory helpers (JS version) -----------------
+
+const EARTH_M_PER_DEG_LAT = 111320.0; // approx metres per degree latitude
+
+/**
+ * Step one segment of a back-trajectory.
+ *
+ * @param {number} lat - starting latitude (deg)
+ * @param {number} lon - starting longitude (deg)
+ * @param {number} ws  - wind speed [m/s]
+ * @param {number} wdDeg - met wind direction [deg FROM which it blows]
+ * @param {number} hours - duration of this segment [hours]
+ * @returns {[number, number]} [latNew, lonNew]
+ */
+function stepBackOneSegment(lat, lon, ws, wdDeg, hours = 1.0) {
+  // Direction air is moving TOWARD (flow direction)
+  const flowDirDeg = (wdDeg + 180.0) % 360.0;
+  const theta = flowDirDeg * Math.PI / 180.0; // radians
+
+  // Components of the wind in m/s (forward trajectory, air movement)
+  const u = ws * Math.sin(theta); // eastward
+  const v = ws * Math.cos(theta); // northward
+
+  // Distance travelled in this segment (forward)
+  const dt = hours * 3600.0;  // seconds
+  const dxForward = u * dt;   // metres east
+  const dyForward = v * dt;   // metres north
+
+  // For a BACK-trajectory, move opposite the air flow
+  const dxBack = -dxForward;
+  const dyBack = -dyForward;
+
+  // Convert metres to degrees lat/lon
+  const dLat = dyBack / EARTH_M_PER_DEG_LAT;
+  let metersPerDegLon = EARTH_M_PER_DEG_LAT * Math.cos(lat * Math.PI / 180.0);
+  if (Math.abs(metersPerDegLon) < 1e-6) metersPerDegLon = 1e-6; // avoid divide-by-zero
+
+  const dLon = dxBack / metersPerDegLon;
+
+  const latNew = lat + dLat;
+  const lonNew = lon + dLon;
+  return [latNew, lonNew];
+}
+
+/**
+ * Compute a piecewise-linear back-trajectory.
+ *
+ * @param {number} lat0 - receptor latitude
+ * @param {number} lon0 - receptor longitude
+ * @param {Array<{ws:number, wd:number, hours?:number}>} winds
+ *   winds[0] = now → 1h back, winds[1] = 1–2h back, etc.
+ * @returns {Array<[number, number]>} list of [lat, lon] including start
+ */
+function computeBackTrajectory(lat0, lon0, winds) {
+  const points = [[lat0, lon0]];
+  let lat = lat0;
+  let lon = lon0;
+
+  (winds || []).forEach(w => {
+    const ws = Number(w.ws);
+    const wd = Number(w.wd);
+    const hours = w.hours != null ? Number(w.hours) : 1.0;
+    if (!isFinite(ws) || !isFinite(wd) || !isFinite(hours)) return;
+
+    const [latNew, lonNew] = stepBackOneSegment(lat, lon, ws, wd, hours);
+    lat = latNew;
+    lon = lonNew;
+    points.push([lat, lon]);
+  });
+
+  return points;
+}
+
+/**
+ * Convert a list of [lat, lon] to a GeoJSON LineString.
+ *
+ * @param {Array<[number, number]>} points
+ * @param {Object} extraProps - extra properties to attach
+ * @returns {Object} GeoJSON Feature
+ */
+function trajectoryToGeoJSON(points, extraProps = {}) {
+  return {
+    type: "Feature",
+    properties: {
+      name: "back_trajectory",
+      ...extraProps
+    },
+    geometry: {
+      type: "LineString",
+      coordinates: points.map(([lat, lon]) => [lon, lat]) // [lon, lat]
+    }
+  };
+}
+
+// Expose globally if needed
+window.computeBackTrajectory = computeBackTrajectory;
+window.trajectoryToGeoJSON = trajectoryToGeoJSON;
+
+
+
+
+
+
+
+
+// ----------------- Distance + exposure helpers -----------------
+
+/** Haversine distance between two points [km] */
+function haversineKm(lat1, lon1, lat2, lon2) {
+  const R = 6371.0; // km
+  const toRad = x => x * Math.PI / 180.0;
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+    Math.sin(dLon / 2) ** 2;
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+/**
+ * Find station-like features within maxDistKm of any trajectory point.
+ *
+ * @param {Array<[number,number]>} trajPoints  [lat, lon] list
+ * @param {Object} fc  GeoJSON FeatureCollection of points
+ * @param {number} maxDistKm
+ * @returns {Array<Object>} array of {feature, minDistKm}
+ */
+function findFeaturesNearTrajectory(trajPoints, fc, maxDistKm = 5) {
+  if (!fc || !Array.isArray(fc.features)) return [];
+  const results = [];
+
+  fc.features.forEach(feat => {
+    if (!feat.geometry || feat.geometry.type !== "Point") return;
+    const [lon, lat] = feat.geometry.coordinates;
+    if (!isFinite(lat) || !isFinite(lon)) return;
+
+    let minDist = Infinity;
+    for (const [tLat, tLon] of trajPoints) {
+      const d = haversineKm(lat, lon, tLat, tLon);
+      if (d < minDist) minDist = d;
+      if (minDist <= maxDistKm) break;
+    }
+
+    if (minDist <= maxDistKm) {
+      results.push({ feature: feat, minDistKm: minDist });
+    }
+  });
+
+  return results;
+}
+
+// Expose globally
+window.findFeaturesNearTrajectory = findFeaturesNearTrajectory;
+
+
+
+
 
 // ----------------- 1) AQHI stations from last6h.csv -----------------
 
@@ -339,6 +498,11 @@ window.npriFCReady = (async () => {
     window.NPRI_FC = { type: "FeatureCollection", features: [] };
   }
 })();
+
+
+
+
+
 
 // Helper function to fetch data for a specific sector
 async function fetchNPRISectorData(sectorQuery, attempt = 1) {
