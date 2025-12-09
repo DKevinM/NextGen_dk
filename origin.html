@@ -417,6 +417,52 @@
       });
     }
 
+    // Summarize dominant upwind sector from ensemble trajectories
+    function computeDominantDirection(trajectories) {
+      const fromBearings = [];
+  
+      for (const traj of trajectories) {
+        if (!traj || traj.length < 2) continue;
+  
+        // Oldest point (back in time) to receptor (first point)
+        const oldest = traj[traj.length - 1];
+        const receptor = traj[0];
+  
+        // Bearing of the *air motion* (oldest → receptor)
+        const motionBearing = bearingDeg(
+          oldest.lat, oldest.lon,
+          receptor.lat, receptor.lon
+        );
+  
+        // Meteorological convention: wind FROM = motion + 180°
+        const windFrom = (motionBearing + 180.0) % 360.0;
+        fromBearings.push(windFrom);
+      }
+  
+      if (!fromBearings.length) {
+        return { sector: null, meanBearing: null, samples: 0 };
+      }
+  
+      // Circular-ish mean (simple average is fine for our rough sectors)
+      const meanFrom =
+        fromBearings.reduce((sum, b) => sum + b, 0) / fromBearings.length;
+  
+      // Count which 45° sector wins
+      const sectorCounts = {};
+      for (const b of fromBearings) {
+        const s = bearingToSector(b); // uses your existing helper
+        sectorCounts[s] = (sectorCounts[s] || 0) + 1;
+      }
+  
+      const dominantSector = Object.entries(sectorCounts)
+        .sort((a, b) => b[1] - a[1])[0][0];
+  
+      return {
+        sector: dominantSector,
+        meanBearing: meanFrom,
+        samples: fromBearings.length
+      };
+    }
 
 
   
