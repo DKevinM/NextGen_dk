@@ -377,6 +377,48 @@
 
     return trajectories;
   }
+
+
+  
+    // Build a coarse “footprint” grid from ensemble trajectories
+    function buildFootprint(trajectories, dlat = 0.05, dlon = 0.05) {
+      const counts = new Map();
+  
+      for (const traj of trajectories) {
+        for (const pt of traj) {
+          const iy = Math.round(pt.lat / dlat);
+          const ix = Math.round(pt.lon / dlon);
+          const key = `${iy},${ix}`;
+          counts.set(key, (counts.get(key) || 0) + 1);
+        }
+      }
+  
+      const cells = [];
+      for (const [key, count] of counts.entries()) {
+        const [iy, ix] = key.split(",").map(Number);
+        cells.push({
+          lat: iy * dlat,
+          lon: ix * dlon,
+          count
+        });
+      }
+      return cells;
+    }
+  
+    // Draw “influence bubbles” from footprint cells
+    function drawFootprint(cells) {
+      cells.forEach(cell => {
+        const radius = 300 + cell.count * 80; // tweak as you like
+        L.circle([cell.lat, cell.lon], {
+          radius,
+          weight: 0,
+          fillOpacity: 0.25
+        }).addTo(trajLayerGroup);
+      });
+    }
+
+
+
   
 // ─────────────────────────────────────────
 // Click handler – 3h centreline + ensemble bubbles
