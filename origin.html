@@ -677,10 +677,19 @@ map.on("click", async (e) => {
       ${npriLines}
     `;
 
-    L.popup()
+    const popup = L.popup({
+      maxWidth: 320,
+      // move popup to the right and slightly up relative to the click
+      offset: L.point(220, -120),
+      autoPan: true,
+      autoPanPaddingTopLeft: [10, 50],
+      autoPanPaddingBottomRight: [10, 10]
+    })
       .setLatLng(e.latlng)
-      .setContent(popupHtml)
-      .openOn(map);
+      .setContent(popupHtml);
+    
+    map.openPopup(popup);
+
 
   } catch (err) {
     console.error("Back-trajectory error:", err);
