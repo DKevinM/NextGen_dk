@@ -29,6 +29,38 @@ function toPointFC(json) {
 }
 
 
+const addressInput = document.getElementById("addressInput");
+const geocodeBtn   = document.getElementById("geocodeBtn");
+
+geocodeBtn.addEventListener("click", async () => {
+  const q = addressInput.value.trim();
+  if (!q) return;
+
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}`;
+    const resp = await fetch(url);
+    const data = await resp.json();
+    if (!data || data.length === 0) {
+      alert("Address not found.");
+      return;
+    }
+
+    const lat = parseFloat(data[0].lat);
+    const lon = parseFloat(data[0].lon);
+
+    // Center map and drop a marker
+    map.setView([lat, lon], 12);
+    L.marker([lat, lon]).addTo(map);
+
+    // Call the same function you use on map click:
+    runBackTrajectory(lat, lon);
+  } catch (e) {
+    console.error("Geocoding error:", e);
+    alert("Could not look up that address.");
+  }
+});
+
+
 
 // ----------------- Back-trajectory helpers (JS version) -----------------
 
