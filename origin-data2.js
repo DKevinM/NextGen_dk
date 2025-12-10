@@ -60,6 +60,18 @@ geocodeBtn.addEventListener("click", async () => {
   }
 });
 
+const eventTimeInput = document.getElementById("eventTime");
+
+function setDefaultEventTime() {
+  const now = new Date();
+  now.setMinutes(0, 0, 0); // round to hour
+  const localISO = now.toISOString().slice(0,16); // "YYYY-MM-DDTHH:MM"
+  eventTimeInput.value = localISO;
+}
+
+setDefaultEventTime();
+
+const backHoursInput = document.getElementById("backHours");
 
 
 // ----------------- Back-trajectory helpers (JS version) -----------------
@@ -115,25 +127,26 @@ function stepBackOneSegment(lat, lon, ws, wdDeg, hours = 1.0) {
  *   winds[0] = now → 1h back, winds[1] = 1–2h back, etc.
  * @returns {Array<[number, number]>} list of [lat, lon] including start
  */
-function computeBackTrajectory(lat0, lon0, winds) {
-  const points = [[lat0, lon0]];
-  let lat = lat0;
-  let lon = lon0;
+async function runBackTrajectory(lat, lon) {
+  // 1) Read event time
+  let eventTime = new Date(eventTimeInput.value);
+  if (isNaN(eventTime.getTime())) {
+    // fallback: use “now”
+    eventTime = new Date();
+  }
 
-  (winds || []).forEach(w => {
-    const ws = Number(w.ws);
-    const wd = Number(w.wd);
-    const hours = w.hours != null ? Number(w.hours) : 1.0;
-    if (!isFinite(ws) || !isFinite(wd) || !isFinite(hours)) return;
+  // Convert to UTC if your wind API wants UTC
+  const eventTimeUTC = new Date(eventTime.toISOString());
 
-    const [latNew, lonNew] = stepBackOneSegment(lat, lon, ws, wd, hours);
-    lat = latNew;
-    lon = lonNew;
-    points.push([lat, lon]);
-  });
+  // 2) Read hours back
+  let hrs = parseInt(backHoursInput.value, 10);
+  if (!Number.isFinite(hrs) || hrs < 1) hrs = 1;
+  if (hrs > 5) hrs = 5;
 
-  return points;
+  // 3) Call your existing wind / trajectory code with (lat, lon, eventTimeUTC, hrs)
+  await computeAndDrawBackTrajectory(lat, lon, eventTimeUTC, hrs);
 }
+
 
 /**
  * Convert a list of [lat, lon] to a GeoJSON LineString.
