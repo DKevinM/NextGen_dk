@@ -30,6 +30,26 @@ function toPointFC(json) {
 
 
 
+function toPointFC(json) {
+  const arr = Array.isArray(json)
+    ? json
+    : (json.data || json.features || Object.values(json || {}));
+
+  return arrayToFeatureCollection(arr || []);
+}
+
+
+
+function setDefaultEventTime() {
+  const now = new Date();
+  now.setMinutes(0, 0, 0); // round to hour
+  const localISO = now.toISOString().slice(0,16); // "YYYY-MM-DDTHH:MM"
+  eventTimeInput.value = localISO;
+}
+
+setDefaultEventTime();
+
+
 
 // ----------------- Back-trajectory helpers (JS version) -----------------
 
