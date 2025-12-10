@@ -407,15 +407,29 @@
   
     // Draw “influence bubbles” from footprint cells
     function drawFootprint(cells) {
+    
+      const maxCount = Math.max(...cells.map(c => c.count));
+    
       cells.forEach(cell => {
-        const radius = 300 + cell.count * 80; // tweak as you like
+        const radius = 300 + cell.count * 80;
+    
+        // normalize 0–1
+        const intensity = cell.count / maxCount;
+    
+        // darker color as intensity increases
+        const shade = Math.floor(80 + 120 * intensity); // 80–200 range
+        const color = `rgb(${shade}, ${shade}, ${shade})`;
+    
         L.circle([cell.lat, cell.lon], {
           radius,
           weight: 0,
-          fillOpacity: 0.25
+          fillOpacity: 0.5,
+          fillColor: color,
+          color: color
         }).addTo(trajLayerGroup);
       });
     }
+
 
 
     // Bearing from (lat1, lon1) TO (lat2, lon2), in degrees 0–360
