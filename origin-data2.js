@@ -76,6 +76,29 @@ const backHoursInput = document.getElementById("backHours");
 
 // ----------------- Back-trajectory helpers (JS version) -----------------
 
+
+async function runBackTrajectory(lat, lon) {
+  // 1) Read event time
+  let eventTime = new Date(eventTimeInput.value);
+  if (isNaN(eventTime.getTime())) {
+    // fallback: use “now”
+    eventTime = new Date();
+  }
+
+  // Convert to UTC if your wind API wants UTC
+  const eventTimeUTC = new Date(eventTime.toISOString());
+
+  // 2) Read hours back
+  let hrs = parseInt(backHoursInput.value, 10);
+  if (!Number.isFinite(hrs) || hrs < 1) hrs = 1;
+  if (hrs > 5) hrs = 5;
+
+  // 3) Call your existing wind / trajectory code with (lat, lon, eventTimeUTC, hrs)
+  await computeAndDrawBackTrajectory(lat, lon, eventTimeUTC, hrs);
+}
+
+
+
 const EARTH_M_PER_DEG_LAT = 111320.0; // approx metres per degree latitude
 
 /**
