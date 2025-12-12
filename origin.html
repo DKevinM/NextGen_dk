@@ -411,7 +411,7 @@
       const maxCount = Math.max(...cells.map(c => c.count));
     
       cells.forEach(cell => {
-        const radius = 600 + cell.count * 150;
+        const radius = 600 + cell.count * 200;
     
         // normalize 0–1
         const intensity = cell.count / maxCount;
@@ -423,8 +423,8 @@
         L.circle([cell.lat, cell.lon], {
           radius,
           weight: 0,
-          fillOpacity: 0.75,
-          fillColor: color,
+          fillOpacity: 0.55,
+          fillColor: "rgba(255, 80, 0, 0.7)",
           color: color
         }).addTo(trajLayerGroup);
       });
@@ -529,7 +529,7 @@
         L.circle([cell.lat, cell.lon], {
           radius,
           weight: 0,
-          fillOpacity: 0.40
+          fillOpacity: 0.55
         }).addTo(trajLayerGroup);
       });
     }
